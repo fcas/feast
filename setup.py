@@ -184,7 +184,7 @@ CI_REQUIRED = (
         "assertpy==1.1",
         "pip-tools",
         "pybindgen",
-        "types-protobuf~=3.19.22",
+        "types-protobuf>=3.19.22,<5.28.0",
         "types-python-dateutil",
         "types-pytz",
         "types-PyYAML",
