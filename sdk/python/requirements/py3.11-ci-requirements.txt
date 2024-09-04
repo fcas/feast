@@ -98,7 +98,7 @@ comm==0.2.2
     #   ipywidgets
 coverage[toml]==7.5.1
     # via pytest-cov
-cryptography==42.0.7
+cryptography==43.0.1
     # via
     #   azure-identity
     #   azure-storage-blob
