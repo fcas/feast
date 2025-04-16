@@ -399,7 +399,7 @@ setup(
         "grpcio>=1.56.2,<2",
         "grpcio-tools>=1.56.2,<2",
         "mypy-protobuf>=3.1",
-        "pybindgen==0.22.0",
+        "pybindgen==0.22.1",
     ],
     cmdclass={
         "build_python_protos": BuildPythonProtosCommand,
