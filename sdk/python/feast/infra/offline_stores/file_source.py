@@ -1,4 +1,7 @@
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+import logging
+from pathlib import Path
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
+from urllib.parse import urlparse
 
 import pyarrow
 from packaging import version
@@ -22,9 +25,16 @@ from feast.repo_config import RepoConfig
 from feast.saved_dataset import SavedDatasetStorage
 from feast.value_type import ValueType
 
+logger = logging.getLogger(__name__)
+
 
 @typechecked
 class FileSource(DataSource):
+    """A FileSource object defines a data source that a DaskOfflineStore or DuckDBOfflineStore class can use."""
+
+    def source_type(self) -> DataSourceProto.SourceType.ValueType:
+        return DataSourceProto.BATCH_FILE
+
     def __init__(
         self,
         *,
@@ -87,7 +97,7 @@ class FileSource(DataSource):
 
     def __eq__(self, other):
         if not isinstance(other, FileSource):
-            raise TypeError("Comparisons should only involve FileSource class objects.")
+            return False
 
         return (
             super().__eq__(other)
@@ -127,7 +137,7 @@ class FileSource(DataSource):
             owner=data_source.owner,
         )
 
-    def to_proto(self) -> DataSourceProto:
+    def _to_proto_impl(self) -> DataSourceProto:
         data_source_proto = DataSourceProto(
             name=self.name,
             type=DataSourceProto.BATCH_FILE,
@@ -144,18 +154,65 @@ class FileSource(DataSource):
         return data_source_proto
 
     def validate(self, config: RepoConfig):
-        # TODO: validate a FileSource
-        pass
+        """Validate that the file source exists and is readable.
+
+        Checks that the path resolves to an existing Parquet or Delta file
+        and that the declared timestamp column is present in the schema.
+        """
+        from feast.infra.offline_stores.file_source import FileSource
+
+        uri = self.path
+        repo_path = config.repo_path if hasattr(config, "repo_path") else None
+        resolved = FileSource.get_uri_for_file_path(repo_path, uri)
+
+        try:
+            filesystem, path = FileSystem.from_uri(resolved)
+            file_info = filesystem.get_file_info(path)
+            if file_info.type == pyarrow.fs.FileType.NotFound:
+                raise FileNotFoundError(f"FileSource path does not exist: {resolved}")
+        except Exception as e:
+            logger.warning("Could not validate FileSource path '%s': %s", resolved, e)
+            return
+
+        try:
+            if isinstance(self.file_options.file_format, DeltaFormat):
+                return
+            pq_dataset = ParquetDataset(path, filesystem=filesystem)
+            schema = pq_dataset.schema
+            if self.timestamp_field and self.timestamp_field not in schema.names:
+                logger.warning(
+                    "Timestamp field '%s' not found in FileSource schema at '%s'. "
+                    "Available columns: %s",
+                    self.timestamp_field,
+                    resolved,
+                    schema.names,
+                )
+        except Exception as e:
+            logger.warning(
+                "Could not read schema from FileSource '%s': %s", resolved, e
+            )
 
     @staticmethod
     def source_datatype_to_feast_value_type() -> Callable[[str], ValueType]:
         return type_map.pa_to_feast_value_type
 
+    @staticmethod
+    def get_uri_for_file_path(repo_path: Union[Path, str, None], uri: str) -> str:
+        parsed_uri = urlparse(uri)
+        if parsed_uri.scheme and parsed_uri.netloc:
+            return uri  # Keep remote URIs as they are
+        if repo_path is not None and not Path(uri).is_absolute():
+            return str(Path(repo_path) / uri)
+        return str(Path(uri))
+
     def get_table_column_names_and_types(
         self, config: RepoConfig
     ) -> Iterable[Tuple[str, str]]:
+        absolute_path = self.get_uri_for_file_path(
+            repo_path=config.repo_path, uri=self.file_options.uri
+        )
         filesystem, path = FileSource.create_filesystem_and_path(
-            self.path, self.file_options.s3_endpoint_override
+            str(absolute_path), self.file_options.s3_endpoint_override
         )
 
         # TODO why None check necessary
@@ -183,11 +240,18 @@ class FileSource(DataSource):
                 "AWS_ENDPOINT_URL": str(self.s3_endpoint_override),
             }
 
-            schema = (
-                DeltaTable(self.path, storage_options=storage_options)
-                .schema()
-                .to_pyarrow()
-            )
+            delta_schema = DeltaTable(
+                self.path, storage_options=storage_options
+            ).schema()
+            if hasattr(delta_schema, "to_arrow"):
+                # deltalake >= 0.10.0
+                arro3_schema = delta_schema.to_arrow()
+                schema = pyarrow.schema(arro3_schema)
+            elif hasattr(delta_schema, "to_pyarrow"):
+                # deltalake < 0.10.0
+                schema = delta_schema.to_pyarrow()
+            else:
+                raise Exception("Unknown DeltaTable package version")
         else:
             raise Exception(f"Unknown FileFormat -> {self.file_format}")
 

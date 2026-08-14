@@ -1,6 +1,7 @@
 import base64
 import importlib
 import json
+import logging
 import os
 import random
 import re
@@ -9,7 +10,7 @@ import tempfile
 from importlib.abc import Loader
 from importlib.machinery import ModuleSpec
 from pathlib import Path
-from typing import List, Set, Union
+from typing import List, Optional, Set, Union
 
 import click
 from click.exceptions import BadParameter
@@ -24,13 +25,18 @@ from feast.feature_service import FeatureService
 from feast.feature_store import FeatureStore
 from feast.feature_view import DUMMY_ENTITY, FeatureView
 from feast.file_utils import replace_str_in_file
+from feast.infra.registry.base_registry import BaseRegistry
 from feast.infra.registry.registry import FEAST_OBJECT_TYPES, FeastObjectType, Registry
+from feast.labeling.label_view import LabelView
 from feast.names import adjectives, animals
 from feast.on_demand_feature_view import OnDemandFeatureView
+from feast.permissions.permission import Permission
+from feast.project import Project
 from feast.repo_config import RepoConfig
 from feast.repo_contents import RepoContents
 from feast.stream_feature_view import StreamFeatureView
-from feast.usage import log_exceptions_and_usage
+
+logger = logging.getLogger(__name__)
 
 
 def py_path_to_module(path: Path) -> str:
@@ -38,6 +44,7 @@ def py_path_to_module(path: Path) -> str:
         str(path.relative_to(os.getcwd()))[: -len(".py")]
         .replace("./", "")
         .replace("/", ".")
+        .replace("\\", ".")
     )
 
 
@@ -63,7 +70,7 @@ def read_feastignore(repo_root: Path) -> List[str]:
 def get_ignore_files(repo_root: Path, ignore_paths: List[str]) -> Set[Path]:
     """Get all ignore files that match any of the user-defined ignore paths"""
     ignore_files = set()
-    for ignore_path in ignore_paths:
+    for ignore_path in set(ignore_paths):
         # ignore_path may contains matchers (* or **). Use glob() to match user-defined path to actual paths
         for matched_path in repo_root.glob(ignore_path):
             if matched_path.is_file():
@@ -82,7 +89,14 @@ def get_ignore_files(repo_root: Path, ignore_paths: List[str]) -> Set[Path]:
 def get_repo_files(repo_root: Path) -> List[Path]:
     """Get the list of all repo files, ignoring undesired files & directories specified in .feastignore"""
     # Read ignore paths from .feastignore and create a set of all files that match any of these paths
-    ignore_paths = read_feastignore(repo_root)
+    ignore_paths = read_feastignore(repo_root) + [
+        ".git",
+        ".feastignore",
+        ".venv",
+        "**/.ipynb_checkpoints",
+        "**/.pytest_cache",
+        "**/__pycache__",
+    ]
     ignore_files = get_ignore_files(repo_root, ignore_paths)
 
     # List all Python files in the root directory (recursively)
@@ -107,12 +121,15 @@ def parse_repo(repo_root: Path) -> RepoContents:
     not result in duplicates, but defining two equal objects will.
     """
     res = RepoContents(
+        projects=[],
         data_sources=[],
         entities=[],
         feature_views=[],
         feature_services=[],
         on_demand_feature_views=[],
         stream_feature_views=[],
+        label_views=[],
+        permissions=[],
     )
 
     for repo_file in get_repo_files(repo_root):
@@ -149,8 +166,9 @@ def parse_repo(repo_root: Path) -> RepoContents:
 
                 # Handle batch sources defined with feature views.
                 batch_source = obj.batch_source
-                assert batch_source
-                if not any((batch_source is ds) for ds in res.data_sources):
+                if batch_source is not None and not any(
+                    (batch_source is ds) for ds in res.data_sources
+                ):
                     res.data_sources.append(batch_source)
 
                 # Handle stream sources defined with feature views.
@@ -165,12 +183,12 @@ def parse_repo(repo_root: Path) -> RepoContents:
 
                 # Handle batch sources defined with feature views.
                 batch_source = obj.batch_source
-                if not any((batch_source is ds) for ds in res.data_sources):
+                if batch_source is not None and not any(
+                    (batch_source is ds) for ds in res.data_sources
+                ):
                     res.data_sources.append(batch_source)
-
-                # Handle stream sources defined with feature views.
+                assert obj.stream_source
                 stream_source = obj.stream_source
-                assert stream_source
                 if not any((stream_source is ds) for ds in res.data_sources):
                     res.data_sources.append(stream_source)
             elif isinstance(obj, BatchFeatureView) and not any(
@@ -180,7 +198,9 @@ def parse_repo(repo_root: Path) -> RepoContents:
 
                 # Handle batch sources defined with feature views.
                 batch_source = obj.batch_source
-                if not any((batch_source is ds) for ds in res.data_sources):
+                if batch_source is not None and not any(
+                    (batch_source is ds) for ds in res.data_sources
+                ):
                     res.data_sources.append(batch_source)
             elif isinstance(obj, Entity) and not any(
                 (obj is entity) for entity in res.entities
@@ -194,41 +214,104 @@ def parse_repo(repo_root: Path) -> RepoContents:
                 (obj is odfv) for odfv in res.on_demand_feature_views
             ):
                 res.on_demand_feature_views.append(obj)
+            elif isinstance(obj, LabelView) and not any(
+                (obj is lv) for lv in res.label_views
+            ):
+                res.label_views.append(obj)
+                if obj.source is not None and not any(
+                    (obj.source is ds) for ds in res.data_sources
+                ):
+                    res.data_sources.append(obj.source)
+                if (
+                    isinstance(obj.source, PushSource)
+                    and obj.source.batch_source
+                    and not any(
+                        (obj.source.batch_source is ds) for ds in res.data_sources
+                    )
+                ):
+                    res.data_sources.append(obj.source.batch_source)
+            elif isinstance(obj, Permission) and not any(
+                (obj is p) for p in res.permissions
+            ):
+                res.permissions.append(obj)
+            elif isinstance(obj, Project) and not any((obj is p) for p in res.projects):
+                res.projects.append(obj)
 
     res.entities.append(DUMMY_ENTITY)
     return res
 
 
-@log_exceptions_and_usage
-def plan(repo_config: RepoConfig, repo_path: Path, skip_source_validation: bool):
+def plan(
+    repo_config: RepoConfig,
+    repo_path: Path,
+    skip_source_validation: bool,
+    skip_feature_view_validation: bool = False,
+):
     os.chdir(repo_path)
-    project, registry, repo, store = _prepare_registry_and_repo(repo_config, repo_path)
+    repo = _get_repo_contents(repo_path, repo_config.project, repo_config)
+    for project in repo.projects:
+        repo_config.project = project.name
+        store, registry = _get_store_and_registry(repo_config)
+        # TODO: When we support multiple projects in a single repo, we should filter repo contents by project
+        if not skip_source_validation:
+            provider = store._get_provider()
+            data_sources = [
+                t.batch_source for t in repo.feature_views if t.batch_source is not None
+            ]
+            # Make sure the data source used by this feature view is supported by Feast
+            for data_source in data_sources:
+                provider.validate_data_source(store.config, data_source)
 
-    if not skip_source_validation:
-        provider = store._get_provider()
-        data_sources = [t.batch_source for t in repo.feature_views]
-        # Make sure the data source used by this feature view is supported by Feast
-        for data_source in data_sources:
-            provider.validate_data_source(store.config, data_source)
-
-    registry_diff, infra_diff, _ = store.plan(repo)
-    click.echo(registry_diff.to_string())
-    click.echo(infra_diff.to_string())
-
-
-def _prepare_registry_and_repo(repo_config, repo_path):
-    store = FeatureStore(config=repo_config)
-    project = store.project
-    if not is_valid_name(project):
-        print(
-            f"{project} is not valid. Project name should only have "
-            f"alphanumerical values and underscores but not start with an underscore."
+        registry_diff, infra_diff, _ = store.plan(
+            repo, skip_feature_view_validation=skip_feature_view_validation
         )
-        sys.exit(1)
-    registry = store.registry
+        click.echo(registry_diff.to_string())
+        click.echo(infra_diff.to_string())
+
+
+def _get_repo_contents(
+    repo_path,
+    project_name: Optional[str] = None,
+    repo_config: Optional[RepoConfig] = None,
+):
     sys.dont_write_bytecode = True
     repo = parse_repo(repo_path)
-    return project, registry, repo, store
+
+    if len(repo.projects) < 1:
+        if project_name:
+            print(
+                f"No project found in the repository. Using project name {project_name} defined in feature_store.yaml"
+            )
+            project_description = (
+                repo_config.project_description if repo_config else None
+            )
+            repo.projects.append(
+                Project(name=project_name, description=project_description or "")
+            )
+        else:
+            print(
+                "No project found in the repository. Either define Project in repository or define a project in feature_store.yaml"
+            )
+            sys.exit(1)
+    elif len(repo.projects) == 1:
+        if repo.projects[0].name != project_name:
+            print(
+                "Project object name should match with the project name defined in feature_store.yaml"
+            )
+            sys.exit(1)
+    else:
+        print(
+            "Multiple projects found in the repository. Currently no support for multiple projects"
+        )
+        sys.exit(1)
+
+    return repo
+
+
+def _get_store_and_registry(repo_config):
+    store = FeatureStore(config=repo_config)
+    registry = store.registry
+    return store, registry
 
 
 def extract_objects_for_apply_delete(project, registry, repo):
@@ -277,14 +360,18 @@ def extract_objects_for_apply_delete(project, registry, repo):
 
 def apply_total_with_repo_instance(
     store: FeatureStore,
-    project: str,
-    registry: Registry,
+    project_name: str,
+    registry: BaseRegistry,
     repo: RepoContents,
     skip_source_validation: bool,
+    skip_feature_view_validation: bool = False,
+    no_promote: bool = False,
 ):
     if not skip_source_validation:
         provider = store._get_provider()
-        data_sources = [t.batch_source for t in repo.feature_views]
+        data_sources = [
+            t.batch_source for t in repo.feature_views if t.batch_source is not None
+        ]
         # Make sure the data source used by this feature view is supported by Feast
         for data_source in data_sources:
             provider.validate_data_source(store.config, data_source)
@@ -295,17 +382,92 @@ def apply_total_with_repo_instance(
         all_to_delete,
         views_to_keep,
         views_to_delete,
-    ) = extract_objects_for_apply_delete(project, registry, repo)
+    ) = extract_objects_for_apply_delete(project_name, registry, repo)
 
-    if store._should_use_plan():
-        registry_diff, infra_diff, new_infra = store.plan(repo)
-        click.echo(registry_diff.to_string())
+    try:
+        if store._should_use_plan():
+            # Planning phase - compute diffs first without progress bars
+            registry_diff, infra_diff, new_infra = store.plan(
+                repo,
+                skip_feature_view_validation=skip_feature_view_validation,
+            )
+            click.echo(registry_diff.to_string())
 
-        store._apply_diffs(registry_diff, infra_diff, new_infra)
-        click.echo(infra_diff.to_string())
-    else:
-        store.apply(all_to_apply, objects_to_delete=all_to_delete, partial=False)
-        log_infra_changes(views_to_keep, views_to_delete)
+            # Only show progress bars if there are actual infrastructure changes
+            progress_ctx = None
+            if len(infra_diff.infra_object_diffs) > 0:
+                from feast.diff.apply_progress import ApplyProgressContext
+
+                progress_ctx = ApplyProgressContext()
+                progress_ctx.start_overall_progress()
+
+            # Apply phase
+            store._apply_diffs(
+                registry_diff,
+                infra_diff,
+                new_infra,
+                progress_ctx=progress_ctx,
+                no_promote=no_promote,
+            )
+            click.echo(infra_diff.to_string())
+        else:
+            # Legacy apply path - no progress bars for legacy path
+            store.apply(
+                all_to_apply,
+                objects_to_delete=all_to_delete,
+                partial=False,
+                skip_feature_view_validation=skip_feature_view_validation,
+                no_promote=no_promote,
+            )
+            log_infra_changes(views_to_keep, views_to_delete)
+    finally:
+        # Cleanup is handled in the new _apply_diffs method
+        pass
+
+    # Submit baseline jobs if needed
+    dqm = store.config.data_quality_monitoring_config
+    if dqm is not None and dqm.auto_baseline:
+        _submit_baseline_jobs(store, project_name, repo)
+
+
+def _submit_baseline_jobs(store, project_name, repo):
+    try:
+        from feast.monitoring.monitoring_service import MonitoringService
+
+        svc = MonitoringService(store)
+        feature_views = list(repo.feature_views)
+        if not feature_views:
+            return
+
+        job_ids = svc.submit_baseline_for_new_features(
+            project=project_name, feature_views=feature_views
+        )
+        if not job_ids:
+            return
+
+        import threading
+
+        def _run_baseline_jobs():
+            for job_id in job_ids:
+                try:
+                    svc.execute_job(job_id)
+                    click.echo(f"  ✓ Baseline computed (job: {job_id})")
+                except Exception:
+                    logging.getLogger(__name__).debug(
+                        "Baseline job %s execution failed (non-critical)",
+                        job_id,
+                        exc_info=True,
+                    )
+
+        click.echo(
+            f"  → Computing baseline metrics in background ({len(job_ids)} job(s))..."
+        )
+        thread = threading.Thread(target=_run_baseline_jobs)
+        thread.start()
+    except Exception:
+        logging.getLogger(__name__).debug(
+            "Monitoring baseline submission skipped (non-critical)", exc_info=True
+        )
 
 
 def log_infra_changes(
@@ -323,7 +485,6 @@ def log_infra_changes(
         )
 
 
-@log_exceptions_and_usage
 def create_feature_store(
     ctx: click.Context,
 ) -> FeatureStore:
@@ -344,28 +505,53 @@ def create_feature_store(
         return FeatureStore(repo_path=str(repo), fs_yaml_file=fs_yaml_file)
 
 
-@log_exceptions_and_usage
-def apply_total(repo_config: RepoConfig, repo_path: Path, skip_source_validation: bool):
+def apply_total(
+    repo_config: RepoConfig,
+    repo_path: Path,
+    skip_source_validation: bool,
+    skip_feature_view_validation: bool = False,
+    no_promote: bool = False,
+):
     os.chdir(repo_path)
-    project, registry, repo, store = _prepare_registry_and_repo(repo_config, repo_path)
-    apply_total_with_repo_instance(
-        store, project, registry, repo, skip_source_validation
-    )
+    repo = _get_repo_contents(repo_path, repo_config.project, repo_config)
+    for project in repo.projects:
+        repo_config.project = project.name
+        store, registry = _get_store_and_registry(repo_config)
+        if not is_valid_name(project.name):
+            print(
+                f"{project.name} is not valid. Project name should only have "
+                f"alphanumerical values, underscores, and hyphens but not start with an underscore or hyphen."
+            )
+            sys.exit(1)
+        # TODO: When we support multiple projects in a single repo, we should filter repo contents by project. Currently there is no way to associate Feast objects to project.
+        print(f"Applying changes for project {project.name}")
+        apply_total_with_repo_instance(
+            store,
+            project.name,
+            registry,
+            repo,
+            skip_source_validation,
+            skip_feature_view_validation,
+            no_promote=no_promote,
+        )
 
 
-@log_exceptions_and_usage
-def teardown(repo_config: RepoConfig, repo_path: Path):
+def teardown(repo_config: RepoConfig, repo_path: Optional[str]):
     # Cannot pass in both repo_path and repo_config to FeatureStore.
-    feature_store = FeatureStore(repo_path=repo_path, config=None)
+    feature_store = FeatureStore(repo_path=repo_path, config=repo_config)
     feature_store.teardown()
 
 
-@log_exceptions_and_usage
 def registry_dump(repo_config: RepoConfig, repo_path: Path) -> str:
     """For debugging only: output contents of the metadata registry"""
     registry_config = repo_config.registry
     project = repo_config.project
-    registry = Registry(project, registry_config=registry_config, repo_path=repo_path)
+    registry = Registry(
+        project,
+        registry_config=registry_config,
+        repo_path=repo_path,
+        auth_config=repo_config.auth_config,
+    )
     registry_dict = registry.to_dict(project=project)
     return json.dumps(registry_dict, indent=2, sort_keys=True)
 
@@ -380,28 +566,37 @@ def cli_check_repo(repo_path: Path, fs_yaml_file: Path):
         sys.exit(1)
 
 
-@log_exceptions_and_usage
-def init_repo(repo_name: str, template: str):
+def init_repo(repo_name: str, template: str, repo_path: Optional[str] = None):
     import os
-    from distutils.dir_util import copy_tree
     from pathlib import Path
+    from shutil import copytree
 
     from colorama import Fore, Style
 
+    # Validate project name
     if not is_valid_name(repo_name):
         raise BadParameter(
-            message="Name should be alphanumeric values and underscores but not start with an underscore",
+            message="Name should be alphanumeric values, underscores, and hyphens but not start with an underscore or hyphen",
             param_hint="PROJECT_DIRECTORY",
         )
-    repo_path = Path(os.path.join(Path.cwd(), repo_name))
-    repo_path.mkdir(exist_ok=True)
-    repo_config_path = repo_path / "feature_store.yaml"
+
+    # Determine where to create the repository
+    if repo_path:
+        # User specified a custom path
+        target_path = Path(repo_path).resolve()
+        target_path.mkdir(parents=True, exist_ok=True)
+        display_path = repo_path
+    else:
+        # Default behavior: create subdirectory with project name
+        target_path = Path(os.path.join(Path.cwd(), repo_name))
+        target_path.mkdir(exist_ok=True)
+        display_path = repo_name
+
+    repo_config_path = target_path / "feature_store.yaml"
 
     if repo_config_path.exists():
-        new_directory = os.path.relpath(repo_path, os.getcwd())
-
         print(
-            f"The directory {Style.BRIGHT + Fore.GREEN}{new_directory}{Style.RESET_ALL} contains an existing feature "
+            f"The directory {Style.BRIGHT + Fore.GREEN}{display_path}{Style.RESET_ALL} contains an existing feature "
             f"store repository that may cause a conflict"
         )
         print()
@@ -411,10 +606,14 @@ def init_repo(repo_name: str, template: str):
     template_path = str(Path(Path(__file__).parent / "templates" / template).absolute())
     if not os.path.exists(template_path):
         raise IOError(f"Could not find template {template}")
-    copy_tree(template_path, str(repo_path))
+    copytree(template_path, str(target_path), dirs_exist_ok=True)
+
+    # Rename gitignore files back to .gitignore
+    for gitignore_path in target_path.rglob("gitignore"):
+        gitignore_path.rename(gitignore_path.with_name(".gitignore"))
 
     # Seed the repository
-    bootstrap_path = repo_path / "bootstrap.py"
+    bootstrap_path = target_path / "bootstrap.py"
     if os.path.exists(bootstrap_path):
         import importlib.util
 
@@ -427,7 +626,7 @@ def init_repo(repo_name: str, template: str):
         os.remove(bootstrap_path)
 
     # Template the feature_store.yaml file
-    feature_store_yaml_path = repo_path / "feature_repo" / "feature_store.yaml"
+    feature_store_yaml_path = target_path / "feature_repo" / "feature_store.yaml"
     replace_str_in_file(
         feature_store_yaml_path, "project: my_project", f"project: {repo_name}"
     )
@@ -435,20 +634,22 @@ def init_repo(repo_name: str, template: str):
     # Remove the __pycache__ folder if it exists
     import shutil
 
-    shutil.rmtree(repo_path / "__pycache__", ignore_errors=True)
+    shutil.rmtree(target_path / "__pycache__", ignore_errors=True)
 
     import click
 
     click.echo()
     click.echo(
-        f"Creating a new Feast repository in {Style.BRIGHT + Fore.GREEN}{repo_path}{Style.RESET_ALL}."
+        f"Creating a new Feast repository in {Style.BRIGHT + Fore.GREEN}{target_path}{Style.RESET_ALL}."
     )
     click.echo()
 
 
 def is_valid_name(name: str) -> bool:
-    """A name should be alphanumeric values and underscores but not start with an underscore"""
-    return not name.startswith("_") and re.compile(r"\W+").search(name) is None
+    """A name should be alphanumeric values, underscores, and hyphens but not start with an underscore"""
+    return (
+        not name.startswith(("_", "-")) and re.compile(r"[^\w-]+").search(name) is None
+    )
 
 
 def generate_project_name() -> str:

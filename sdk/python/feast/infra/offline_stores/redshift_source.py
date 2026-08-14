@@ -24,6 +24,11 @@ from feast.value_type import ValueType
 
 @typechecked
 class RedshiftSource(DataSource):
+    """A RedshiftSource object defines a data source that a RedshiftOfflineStore class can use."""
+
+    def source_type(self) -> DataSourceProto.SourceType.ValueType:
+        return DataSourceProto.BATCH_REDSHIFT
+
     def __init__(
         self,
         *,
@@ -118,9 +123,7 @@ class RedshiftSource(DataSource):
 
     def __eq__(self, other):
         if not isinstance(other, RedshiftSource):
-            raise TypeError(
-                "Comparisons should only involve RedshiftSource class objects."
-            )
+            return False
 
         return (
             super().__eq__(other)
@@ -150,7 +153,7 @@ class RedshiftSource(DataSource):
         """Returns the Redshift database of this Redshift source."""
         return self.redshift_options.database
 
-    def to_proto(self) -> DataSourceProto:
+    def _to_proto_impl(self) -> DataSourceProto:
         """
         Converts a RedshiftSource object to its protobuf representation.
 

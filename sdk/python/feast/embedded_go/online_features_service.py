@@ -1,3 +1,4 @@
+import logging
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
@@ -36,6 +37,8 @@ MICRO_SECOND = 1000 * NANO_SECOND
 MILLI_SECOND = 1000 * MICRO_SECOND
 SECOND = 1000 * MILLI_SECOND
 
+logger = logging.getLogger(__name__)
+
 
 class EmbeddedOnlineFeatureServer:
     def __init__(
@@ -64,6 +67,7 @@ class EmbeddedOnlineFeatureServer:
         entities: Dict[str, Union[List[Any], Value_pb2.RepeatedValue]],
         request_data: Dict[str, Union[List[Any], Value_pb2.RepeatedValue]],
         full_feature_names: bool = False,
+        include_feature_view_version_metadata: bool = False,
     ):
         if feature_service:
             join_keys_types = self._service.GetEntityTypesMapByFeatureService(
@@ -243,28 +247,32 @@ def transformation_callback(
     output_schema_ptr: int,
     full_feature_names: bool,
 ) -> int:
-    odfv = fs.get_on_demand_feature_view(on_demand_feature_view_name)
+    try:
+        odfv = fs.get_on_demand_feature_view(on_demand_feature_view_name)
 
-    input_record = pa.RecordBatch._import_from_c(input_arr_ptr, input_schema_ptr)
+        input_record = pa.RecordBatch._import_from_c(input_arr_ptr, input_schema_ptr)
 
-    # For some reason, the callback is called with `full_feature_names` as a 1 if True or 0 if false. This handles
-    # the typeguard requirement.
-    full_feature_names = bool(full_feature_names)
+        # For some reason, the callback is called with `full_feature_names` as a 1 if True or 0 if false. This handles
+        # the typeguard requirement.
+        full_feature_names = bool(full_feature_names)
 
-    if odfv.mode != "pandas":
-        raise Exception(
-            f"OnDemandFeatureView mode '{odfv.mode} not supported by EmbeddedOnlineFeatureServer."
+        if odfv.mode != "pandas":
+            raise Exception(
+                f"OnDemandFeatureView mode '{odfv.mode} not supported by EmbeddedOnlineFeatureServer."
+            )
+
+        output = odfv.get_transformed_features_df(  # type: ignore
+            input_record.to_pandas(), full_feature_names=full_feature_names
         )
+        output_record = pa.RecordBatch.from_pandas(output)
 
-    output = odfv.get_transformed_features_df(
-        input_record.to_pandas(), full_feature_names=full_feature_names
-    )
-    output_record = pa.RecordBatch.from_pandas(output)
+        output_record.schema._export_to_c(output_schema_ptr)
+        output_record._export_to_c(output_arr_ptr)
 
-    output_record.schema._export_to_c(output_schema_ptr)
-    output_record._export_to_c(output_arr_ptr)
-
-    return output_record.num_rows
+        return output_record.num_rows
+    except Exception as e:
+        logger.exception(f"transformation callback failed with exception: {e}", e)
+        return 0
 
 
 def logging_callback(

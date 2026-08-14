@@ -1,16 +1,18 @@
+import json
 import random
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from feast import FeatureView, Field
-from feast.types import Float32, Int32
-from tests.integration.feature_repos.repo_configuration import (
+from feast.types import Float32, Int32, Json, Map, String, Struct
+from feast.utils import _utc_now
+from tests.universal.feature_repos.repo_configuration import (
     construct_universal_feature_views,
 )
-from tests.integration.feature_repos.universal.entities import driver
+from tests.universal.feature_repos.universal.entities import driver
 
 
 @pytest.mark.integration
@@ -23,7 +25,7 @@ def test_reorder_columns(environment, universal_data_sources):
     driver_fv = feature_views.driver
     store.apply([driver(), driver_fv])
 
-    now = datetime.utcnow()
+    now = _utc_now()
     ts = pd.Timestamp(now).round("ms")
 
     # This dataframe has columns in the wrong order.
@@ -35,6 +37,18 @@ def test_reorder_columns(environment, universal_data_sources):
             "event_timestamp": [ts, ts],
             "acc_rate": [random.random(), random.random()],
             "driver_id": [1001, 1001],
+            "driver_metadata": [
+                {"vehicle_type": "sedan", "rating": "4.5"},
+                {"vehicle_type": "suv", "rating": "3.8"},
+            ],
+            "driver_config": [
+                json.dumps({"max_distance_km": 100, "preferred_zones": ["north"]}),
+                json.dumps({"max_distance_km": 50, "preferred_zones": ["south"]}),
+            ],
+            "driver_profile": [
+                {"name": "driver_1001", "age": "30"},
+                {"name": "driver_1001", "age": "30"},
+            ],
         },
     )
 
@@ -53,7 +67,7 @@ def test_writing_incorrect_schema_fails(environment, universal_data_sources):
     driver_fv = feature_views.driver
     store.apply([driver(), driver_fv])
 
-    now = datetime.utcnow()
+    now = _utc_now()
     ts = pd.Timestamp(now).round("ms")
 
     expected_df = pd.DataFrame.from_dict(
@@ -65,10 +79,23 @@ def test_writing_incorrect_schema_fails(environment, universal_data_sources):
             "created": [ts, ts],
         },
     )
-    with pytest.raises(ValueError):
+    expected_missing = [
+        "acc_rate",
+        "avg_daily_trips",
+        "driver_config",
+        "driver_metadata",
+        "driver_profile",
+    ]
+    expected_extra = ["incorrect_schema"]
+
+    with pytest.raises(ValueError, match="missing_expected_columns") as excinfo:
         store.write_to_offline_store(
             driver_fv.name, expected_df, allow_registry_cache=False
         )
+
+    error_message = str(excinfo.value)
+    assert f"missing_expected_columns: {expected_missing}" in error_message
+    assert f"extra_unexpected_columns: {expected_extra}" in error_message
 
 
 @pytest.mark.integration
@@ -84,6 +111,12 @@ def test_writing_consecutively_to_offline_store(environment, universal_data_sour
             Field(name="avg_daily_trips", dtype=Int32),
             Field(name="conv_rate", dtype=Float32),
             Field(name="acc_rate", dtype=Float32),
+            Field(name="driver_metadata", dtype=Map),
+            Field(name="driver_config", dtype=Json),
+            Field(
+                name="driver_profile",
+                dtype=Struct({"name": String, "age": String}),
+            ),
         ],
         source=data_sources.driver,
         ttl=timedelta(
@@ -91,7 +124,7 @@ def test_writing_consecutively_to_offline_store(environment, universal_data_sour
         ),  # This is to make sure all offline store data is out of date since get_historical_features() only searches backwards for a ttl window.
     )
 
-    now = datetime.utcnow()
+    now = _utc_now()
     ts = pd.Timestamp(now, unit="ns")
 
     entity_df = pd.DataFrame.from_dict(
@@ -102,6 +135,8 @@ def test_writing_consecutively_to_offline_store(environment, universal_data_sour
     )
 
     store.apply([driver_entity, driver_stats])
+    # Refresh registry after apply to ensure subsequent reads see the new feature view
+    store.refresh_registry()
     df = store.get_historical_features(
         entity_df=entity_df,
         features=[
@@ -124,6 +159,18 @@ def test_writing_consecutively_to_offline_store(environment, universal_data_sour
             "acc_rate": [random.random(), random.random()],
             "avg_daily_trips": [random.randint(0, 10), random.randint(0, 10)],
             "created": [ts, ts],
+            "driver_metadata": [
+                {"vehicle_type": "sedan", "rating": "4.5"},
+                {"vehicle_type": "suv", "rating": "3.8"},
+            ],
+            "driver_config": [
+                json.dumps({"max_distance_km": 100, "preferred_zones": ["north"]}),
+                json.dumps({"max_distance_km": 50, "preferred_zones": ["south"]}),
+            ],
+            "driver_profile": [
+                {"name": "driver_1001", "age": "30"},
+                {"name": "driver_1001", "age": "35"},
+            ],
         },
     )
     first_df = first_df.astype({"conv_rate": "float32", "acc_rate": "float32"})
@@ -168,6 +215,18 @@ def test_writing_consecutively_to_offline_store(environment, universal_data_sour
             "acc_rate": [random.random(), random.random()],
             "avg_daily_trips": [random.randint(0, 10), random.randint(0, 10)],
             "created": [ts, ts],
+            "driver_metadata": [
+                {"vehicle_type": "truck", "rating": "4.0"},
+                {"vehicle_type": "sedan", "rating": "4.2"},
+            ],
+            "driver_config": [
+                json.dumps({"max_distance_km": 150, "preferred_zones": ["east"]}),
+                json.dumps({"max_distance_km": 200, "preferred_zones": ["west"]}),
+            ],
+            "driver_profile": [
+                {"name": "driver_1001", "age": "31"},
+                {"name": "driver_1001", "age": "36"},
+            ],
         },
     )
     second_df = second_df.astype({"conv_rate": "float32", "acc_rate": "float32"})

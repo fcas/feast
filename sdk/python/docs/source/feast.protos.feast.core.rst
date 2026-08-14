@@ -68,22 +68,6 @@ feast.protos.feast.core.DatastoreTable\_pb2\_grpc module
    :undoc-members:
    :show-inheritance:
 
-feast.protos.feast.core.DynamoDBTable\_pb2 module
--------------------------------------------------
-
-.. automodule:: feast.protos.feast.core.DynamoDBTable_pb2
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-feast.protos.feast.core.DynamoDBTable\_pb2\_grpc module
--------------------------------------------------------
-
-.. automodule:: feast.protos.feast.core.DynamoDBTable_pb2_grpc
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 feast.protos.feast.core.Entity\_pb2 module
 ------------------------------------------
 
@@ -196,6 +180,14 @@ feast.protos.feast.core.InfraObject\_pb2\_grpc module
    :undoc-members:
    :show-inheritance:
 
+feast.protos.feast.core.LabelView\_pb2 module
+----------------------------------------------
+
+.. automodule:: feast.protos.feast.core.LabelView_pb2
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 feast.protos.feast.core.OnDemandFeatureView\_pb2 module
 -------------------------------------------------------
 
@@ -208,6 +200,54 @@ feast.protos.feast.core.OnDemandFeatureView\_pb2\_grpc module
 -------------------------------------------------------------
 
 .. automodule:: feast.protos.feast.core.OnDemandFeatureView_pb2_grpc
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+feast.protos.feast.core.Permission\_pb2 module
+----------------------------------------------
+
+.. automodule:: feast.protos.feast.core.Permission_pb2
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+feast.protos.feast.core.Permission\_pb2\_grpc module
+----------------------------------------------------
+
+.. automodule:: feast.protos.feast.core.Permission_pb2_grpc
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+feast.protos.feast.core.Policy\_pb2 module
+------------------------------------------
+
+.. automodule:: feast.protos.feast.core.Policy_pb2
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+feast.protos.feast.core.Policy\_pb2\_grpc module
+------------------------------------------------
+
+.. automodule:: feast.protos.feast.core.Policy_pb2_grpc
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+feast.protos.feast.core.Project\_pb2 module
+-------------------------------------------
+
+.. automodule:: feast.protos.feast.core.Project_pb2
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+feast.protos.feast.core.Project\_pb2\_grpc module
+-------------------------------------------------
+
+.. automodule:: feast.protos.feast.core.Project_pb2_grpc
    :members:
    :undoc-members:
    :show-inheritance:
@@ -288,6 +328,22 @@ feast.protos.feast.core.StreamFeatureView\_pb2\_grpc module
 -----------------------------------------------------------
 
 .. automodule:: feast.protos.feast.core.StreamFeatureView_pb2_grpc
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+feast.protos.feast.core.Transformation\_pb2 module
+--------------------------------------------------
+
+.. automodule:: feast.protos.feast.core.Transformation_pb2
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+feast.protos.feast.core.Transformation\_pb2\_grpc module
+--------------------------------------------------------
+
+.. automodule:: feast.protos.feast.core.Transformation_pb2_grpc
    :members:
    :undoc-members:
    :show-inheritance:

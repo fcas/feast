@@ -30,6 +30,22 @@ def test_push_with_batch():
     assert push_source.batch_source.name == push_source_unproto.batch_source.name
 
 
+def test_push_source_without_batch_source():
+    # Create PushSource with no batch_source
+    push_source = PushSource(name="test_push_source")
+
+    # Convert to proto
+    push_source_proto = push_source.to_proto()
+
+    # Assert batch_source is not present in proto
+    assert not push_source_proto.HasField("batch_source")
+
+    # Deserialize and check again
+    push_source_unproto = PushSource.from_proto(push_source_proto)
+    assert push_source_unproto.batch_source is None
+    assert push_source_unproto.name == "test_push_source"
+
+
 def test_request_source_primitive_type_to_proto():
     schema = [
         Field(name="f1", dtype=Float32),
@@ -181,6 +197,63 @@ def test_proto_conversion():
     assert DataSource.from_proto(push_source.to_proto()) == push_source
     assert DataSource.from_proto(request_source.to_proto()) == request_source
 
+    # Test that timestamps are properly included in protobuf conversion
+    # Test FileSource timestamps
+    file_proto = file_source.to_proto()
+    assert file_proto.HasField("meta")
+    assert file_proto.meta.HasField("created_timestamp")
+    assert file_proto.meta.HasField("last_updated_timestamp")
+    assert file_source.created_timestamp is not None
+    assert file_source.last_updated_timestamp is not None
+
+    # Test BigQuerySource timestamps
+    bigquery_proto = bigquery_source.to_proto()
+    assert bigquery_proto.HasField("meta")
+    assert bigquery_proto.meta.HasField("created_timestamp")
+    assert bigquery_proto.meta.HasField("last_updated_timestamp")
+    assert bigquery_source.created_timestamp is not None
+    assert bigquery_source.last_updated_timestamp is not None
+
+    # Test RedshiftSource timestamps
+    redshift_proto = redshift_source.to_proto()
+    assert redshift_proto.HasField("meta")
+    assert redshift_proto.meta.HasField("created_timestamp")
+    assert redshift_proto.meta.HasField("last_updated_timestamp")
+    assert redshift_source.created_timestamp is not None
+    assert redshift_source.last_updated_timestamp is not None
+
+    # Test KafkaSource timestamps
+    kafka_proto = kafka_source.to_proto()
+    assert kafka_proto.HasField("meta")
+    assert kafka_proto.meta.HasField("created_timestamp")
+    assert kafka_proto.meta.HasField("last_updated_timestamp")
+    assert kafka_source.created_timestamp is not None
+    assert kafka_source.last_updated_timestamp is not None
+
+    # Test KinesisSource timestamps
+    kinesis_proto = kinesis_source.to_proto()
+    assert kinesis_proto.HasField("meta")
+    assert kinesis_proto.meta.HasField("created_timestamp")
+    assert kinesis_proto.meta.HasField("last_updated_timestamp")
+    assert kinesis_source.created_timestamp is not None
+    assert kinesis_source.last_updated_timestamp is not None
+
+    # Test PushSource timestamps
+    push_proto = push_source.to_proto()
+    assert push_proto.HasField("meta")
+    assert push_proto.meta.HasField("created_timestamp")
+    assert push_proto.meta.HasField("last_updated_timestamp")
+    assert push_source.created_timestamp is not None
+    assert push_source.last_updated_timestamp is not None
+
+    # Test RequestSource timestamps
+    request_proto = request_source.to_proto()
+    assert request_proto.HasField("meta")
+    assert request_proto.meta.HasField("created_timestamp")
+    assert request_proto.meta.HasField("last_updated_timestamp")
+    assert request_source.created_timestamp is not None
+    assert request_source.last_updated_timestamp is not None
+
 
 def test_column_conflict():
     with pytest.raises(ValueError):
@@ -233,3 +306,30 @@ def test_redshift_fully_qualified_table_name(source_kwargs, expected_name):
     )
 
     assert redshift_source.redshift_options.fully_qualified_table_name == expected_name
+
+
+def test_data_source_eq_cross_type_returns_false():
+    """A DataSource compared to a different type returns ``False``, never ``TypeError``.
+
+    Regression: ``__eq__`` used to ``raise TypeError("Comparisons should only involve
+    <X> class objects.")`` on a cross-type comparison, so changing a feature view's
+    source type and re-``apply()``-ing over an existing registry crashed. Comparing
+    objects of different types must return ``False``, matching ``PushSource.__eq__``.
+    """
+    file_source = FileSource(name="src", path="/tmp/x.parquet", timestamp_field="ts")
+    snowflake_source = SnowflakeSource(
+        name="src", database="D", schema="S", table="T", timestamp_field="ts"
+    )
+
+    # Cross-type comparison is False in both directions, not a raise.
+    assert (file_source == snowflake_source) is False
+    assert (snowflake_source == file_source) is False
+
+    # Comparison against a non-DataSource operand is also False, not a raise.
+    assert (file_source == "not a data source") is False
+    assert (file_source == 42) is False
+
+    # Same-type equality still holds for two independently-built equal instances.
+    assert file_source == FileSource(
+        name="src", path="/tmp/x.parquet", timestamp_field="ts"
+    )

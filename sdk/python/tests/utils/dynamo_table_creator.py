@@ -1,11 +1,10 @@
-from datetime import datetime
-
 import boto3
 
 from feast import utils
 from feast.infra.online_stores.helpers import compute_entity_id
 from feast.protos.feast.types.EntityKey_pb2 import EntityKey as EntityKeyProto
 from feast.protos.feast.types.Value_pb2 import Value as ValueProto
+from feast.utils import _utc_now
 
 
 def create_n_customer_test_samples(n=10):
@@ -19,7 +18,7 @@ def create_n_customer_test_samples(n=10):
                 "name": ValueProto(string_val="John"),
                 "age": ValueProto(int64_val=3),
             },
-            datetime.utcnow(),
+            _utc_now(),
             None,
         )
         for i in range(n)
@@ -45,7 +44,7 @@ def insert_data_test_table(data, project, tbl_name, region):
     dynamodb_resource = boto3.resource("dynamodb", region_name=region)
     table_instance = dynamodb_resource.Table(f"{project}.{tbl_name}")
     for entity_key, features, timestamp, created_ts in data:
-        entity_id = compute_entity_id(entity_key, entity_key_serialization_version=2)
+        entity_id = compute_entity_id(entity_key, entity_key_serialization_version=3)
         with table_instance.batch_writer() as batch:
             batch.put_item(
                 Item={

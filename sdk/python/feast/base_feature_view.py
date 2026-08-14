@@ -18,9 +18,11 @@ from typing import Dict, List, Optional, Type, Union
 from google.protobuf.json_format import MessageToJson
 from google.protobuf.message import Message
 
+from feast.data_source import DataSource
 from feast.feature_view_projection import FeatureViewProjection
 from feast.field import Field
 from feast.protos.feast.core.FeatureView_pb2 import FeatureView as FeatureViewProto
+from feast.protos.feast.core.LabelView_pb2 import LabelView as LabelViewProto
 from feast.protos.feast.core.OnDemandFeatureView_pb2 import (
     OnDemandFeatureView as OnDemandFeatureViewProto,
 )
@@ -55,6 +57,8 @@ class BaseFeatureView(ABC):
     projection: FeatureViewProjection
     created_timestamp: Optional[datetime]
     last_updated_timestamp: Optional[datetime]
+    version: str
+    current_version_number: Optional[int]
 
     @abstractmethod
     def __init__(
@@ -65,6 +69,7 @@ class BaseFeatureView(ABC):
         description: str = "",
         tags: Optional[Dict[str, str]] = None,
         owner: str = "",
+        source: Optional[DataSource] = None,
     ):
         """
         Creates a BaseFeatureView object.
@@ -76,7 +81,8 @@ class BaseFeatureView(ABC):
             tags (optional): A dictionary of key-value pairs to store arbitrary metadata.
             owner (optional): The owner of the base feature view, typically the email of the
                 primary maintainer.
-
+            source (optional): The source of data for this group of features. May be a stream source, or a batch source.
+                If a stream source, the source should contain a batch_source for backfills & batch materialization.
         Raises:
             ValueError: A field mapping conflicts with an Entity or a Feature.
         """
@@ -89,6 +95,12 @@ class BaseFeatureView(ABC):
         self.projection = FeatureViewProjection.from_definition(self)
         self.created_timestamp = None
         self.last_updated_timestamp = None
+        if not hasattr(self, "version"):
+            self.version = "latest"
+        if not hasattr(self, "current_version_number"):
+            self.current_version_number = None
+
+        self.source = source
 
     @property
     @abstractmethod
@@ -98,7 +110,12 @@ class BaseFeatureView(ABC):
     @abstractmethod
     def to_proto(
         self,
-    ) -> Union[FeatureViewProto, OnDemandFeatureViewProto, StreamFeatureViewProto]:
+    ) -> Union[
+        FeatureViewProto,
+        OnDemandFeatureViewProto,
+        StreamFeatureViewProto,
+        LabelViewProto,
+    ]:
         pass
 
     @classmethod
@@ -142,11 +159,20 @@ class BaseFeatureView(ABC):
 
         return cp
 
+    def _schema_or_udf_changed(self, other: "BaseFeatureView") -> bool:
+        """Check if schema or UDF-related fields have changed (version-worthy changes).
+
+        Callers always match by name first, so name comparison is omitted here.
+        """
+        if sorted(self.features) != sorted(other.features):
+            return True
+        # Skip metadata: description, tags, owner, projection
+        # Skip source changes: treat as deployment/location details, not schema changes
+        return False
+
     def __eq__(self, other):
         if not isinstance(other, BaseFeatureView):
-            raise TypeError(
-                "Comparisons should only involve BaseFeatureView class objects."
-            )
+            return False
 
         if (
             self.name != other.name
@@ -156,6 +182,10 @@ class BaseFeatureView(ABC):
             or self.tags != other.tags
             or self.owner != other.owner
         ):
+            # This is meant to ignore the File Source change to Push Source
+            if isinstance(type(self.source), type(other.source)):
+                if self.source != other.source:
+                    return False
             return False
 
         return True
@@ -169,6 +199,18 @@ class BaseFeatureView(ABC):
         """
         if not self.name:
             raise ValueError("Feature view needs a name.")
+        if "@" in self.name:
+            raise ValueError(
+                f"Feature view name '{self.name}' must not contain '@'. "
+                f"The '@' character is reserved for version-qualified references "
+                f"(e.g., 'fv@v2:feature')."
+            )
+        if ":" in self.name:
+            raise ValueError(
+                f"Feature view name '{self.name}' must not contain ':'. "
+                f"The ':' character is reserved as the separator in fully qualified "
+                f"feature references (e.g., 'feature_view:feature_name')."
+            )
 
     def with_name(self, name: str):
         """

@@ -17,7 +17,10 @@ from feast.data_source import DataSource
 from feast.entity import Entity
 from feast.feature_service import FeatureService
 from feast.feature_view import FeatureView
+from feast.labeling.label_view import LabelView
 from feast.on_demand_feature_view import OnDemandFeatureView
+from feast.permissions.permission import Permission
+from feast.project import Project
 from feast.protos.feast.core.Registry_pb2 import Registry as RegistryProto
 from feast.stream_feature_view import StreamFeatureView
 
@@ -27,15 +30,19 @@ class RepoContents(NamedTuple):
     Represents the objects in a Feast feature repo.
     """
 
+    projects: List[Project]
     data_sources: List[DataSource]
     feature_views: List[FeatureView]
     on_demand_feature_views: List[OnDemandFeatureView]
     stream_feature_views: List[StreamFeatureView]
+    label_views: List[LabelView]
     entities: List[Entity]
     feature_services: List[FeatureService]
+    permissions: List[Permission]
 
     def to_registry_proto(self) -> RegistryProto:
         registry_proto = RegistryProto()
+        registry_proto.projects.extend([e.to_proto() for e in self.projects])
         registry_proto.data_sources.extend([e.to_proto() for e in self.data_sources])
         registry_proto.entities.extend([e.to_proto() for e in self.entities])
         registry_proto.feature_views.extend(
@@ -44,10 +51,13 @@ class RepoContents(NamedTuple):
         registry_proto.on_demand_feature_views.extend(
             [fv.to_proto() for fv in self.on_demand_feature_views]
         )
+        registry_proto.label_views.extend([lv.to_proto() for lv in self.label_views])
         registry_proto.feature_services.extend(
             [fs.to_proto() for fs in self.feature_services]
         )
         registry_proto.stream_feature_views.extend(
             [fv.to_proto() for fv in self.stream_feature_views]
         )
+        registry_proto.permissions.extend([p.to_proto() for p in self.permissions])
+
         return registry_proto

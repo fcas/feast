@@ -1,13 +1,13 @@
 # Offline stores
 
-Please see [Offline Store](../../getting-started/architecture-and-components/offline-store.md) for a conceptual explanation of offline stores.
+Please see [Offline Store](../../getting-started/components/offline-store.md) for a conceptual explanation of offline stores.
 
 {% content-ref url="overview.md" %}
 [overview.md](overview.md)
 {% endcontent-ref %}
 
-{% content-ref url="file.md" %}
-[file.md](file.md)
+{% content-ref url="dask.md" %}
+[dask.md](dask.md)
 {% endcontent-ref %}
 
 {% content-ref url="snowflake.md" %}
@@ -26,6 +26,10 @@ Please see [Offline Store](../../getting-started/architecture-and-components/off
 [duckdb.md](duckdb.md)
 {% endcontent-ref %}
 
+{% content-ref url="couchbase.md" %}
+[couchbase.md](couchbase.md)
+{% endcontent-ref %}
+
 {% content-ref url="spark.md" %}
 [spark.md](spark.md)
 {% endcontent-ref %}
@@ -40,4 +44,32 @@ Please see [Offline Store](../../getting-started/architecture-and-components/off
 
 {% content-ref url="mssql.md" %}
 [mssql.md](mssql.md)
+{% endcontent-ref %}
+
+{% content-ref url="ray.md" %}
+[ray.md](ray.md)
+{% endcontent-ref %}
+
+{% content-ref url="oracle.md" %}
+[oracle.md](oracle.md)
+{% endcontent-ref %}
+
+{% content-ref url="athena.md" %}
+[athena.md](athena.md)
+{% endcontent-ref %}
+
+{% content-ref url="clickhouse.md" %}
+[clickhouse.md](clickhouse.md)
+{% endcontent-ref %}
+
+{% content-ref url="mongodb.md" %}
+[mongodb.md](mongodb.md)
+{% endcontent-ref %}
+
+{% content-ref url="remote-offline-store.md" %}
+[remote-offline-store.md](remote-offline-store.md)
+{% endcontent-ref %}
+
+{% content-ref url="hybrid.md" %}
+[hybrid.md](hybrid.md)
 {% endcontent-ref %}

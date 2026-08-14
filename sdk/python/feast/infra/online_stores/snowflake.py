@@ -1,4 +1,3 @@
-import itertools
 import os
 from binascii import hexlify
 from datetime import datetime
@@ -20,7 +19,6 @@ from feast.infra.utils.snowflake.snowflake_utils import (
 from feast.protos.feast.types.EntityKey_pb2 import EntityKey as EntityKeyProto
 from feast.protos.feast.types.Value_pb2 import Value as ValueProto
 from feast.repo_config import FeastConfigBaseModel, RepoConfig
-from feast.usage import log_exceptions_and_usage
 from feast.utils import to_naive_utc
 
 
@@ -31,7 +29,10 @@ class SnowflakeOnlineStoreConfig(FeastConfigBaseModel):
     """ Online store type selector """
 
     config_path: Optional[str] = os.path.expanduser("~/.snowsql/config")
-    """ Snowflake config path -- absolute path required (Can't use ~)"""
+    """ Snowflake snowsql config path -- absolute path required (Cant use ~)"""
+
+    connection_name: Optional[str] = None
+    """ Snowflake connector connection name -- typically defined in ~/.snowflake/connections.toml """
 
     account: Optional[str] = None
     """ Snowflake deployment identifier -- drop .snowflakecomputing.com """
@@ -51,16 +52,24 @@ class SnowflakeOnlineStoreConfig(FeastConfigBaseModel):
     authenticator: Optional[str] = None
     """ Snowflake authenticator name """
 
+    private_key: Optional[str] = None
+    """ Snowflake private key file path"""
+
+    private_key_content: Optional[bytes] = None
+    """ Snowflake private key stored as bytes"""
+
+    private_key_passphrase: Optional[str] = None
+    """ Snowflake private key file passphrase"""
+
     database: StrictStr
     """ Snowflake database name """
 
     schema_: Optional[str] = Field("PUBLIC", alias="schema")
     """ Snowflake schema name """
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
 
 
 class SnowflakeOnlineStore(OnlineStore):
-    @log_exceptions_and_usage(online_store="snowflake")
     def online_write_batch(
         self,
         config: RepoConfig,
@@ -139,38 +148,45 @@ class SnowflakeOnlineStore(OnlineStore):
                             "_feast_row" = 1;
                 """
                 execute_snowflake_statement(conn, query)
-
+                conn.commit()
             if progress:
                 progress(len(data))
 
         return None
 
-    @log_exceptions_and_usage(online_store="snowflake")
     def online_read(
         self,
         config: RepoConfig,
         table: FeatureView,
         entity_keys: List[EntityKeyProto],
-        requested_features: List[str],
+        requested_features: Optional[List[str]] = None,
     ) -> List[Tuple[Optional[datetime], Optional[Dict[str, ValueProto]]]]:
         assert isinstance(config.online_store, SnowflakeOnlineStoreConfig)
 
         result: List[Tuple[Optional[datetime], Optional[Dict[str, ValueProto]]]] = []
+
+        requested_features = requested_features if requested_features else []
+
+        # Pre-compute serialized entity keys to avoid redundant serialization
+        serialized_entity_keys = [
+            serialize_entity_key(
+                entity_key,
+                entity_key_serialization_version=config.entity_key_serialization_version,
+            )
+            for entity_key in entity_keys
+        ]
 
         entity_fetch_str = ",".join(
             [
                 (
                     "TO_BINARY("
                     + hexlify(
-                        serialize_entity_key(
-                            combo[0],
-                            entity_key_serialization_version=config.entity_key_serialization_version,
-                        )
-                        + bytes(combo[1], encoding="utf-8")
+                        serialized_entity_key + bytes(feature, encoding="utf-8")
                     ).__str__()[1:]
                     + ")"
                 )
-                for combo in itertools.product(entity_keys, requested_features)
+                for serialized_entity_key in serialized_entity_keys
+                for feature in requested_features
             ]
         )
 
@@ -186,11 +202,7 @@ class SnowflakeOnlineStore(OnlineStore):
             """
             df = execute_snowflake_statement(conn, query).fetch_pandas_all()
 
-        for entity_key in entity_keys:
-            entity_key_bin = serialize_entity_key(
-                entity_key,
-                entity_key_serialization_version=config.entity_key_serialization_version,
-            )
+        for entity_key_bin in serialized_entity_keys:
             res = {}
             res_ts = None
             for index, row in df[df["entity_key"] == entity_key_bin].iterrows():
@@ -205,7 +217,6 @@ class SnowflakeOnlineStore(OnlineStore):
                 result.append((res_ts, res))
         return result
 
-    @log_exceptions_and_usage(online_store="snowflake")
     def update(
         self,
         config: RepoConfig,

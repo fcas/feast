@@ -13,15 +13,15 @@ from feast.feature_logging import (
 )
 from feast.feature_service import FeatureService
 from feast.wait import wait_retry_backoff
-from tests.integration.feature_repos.repo_configuration import (
+from tests.universal.feature_repos.repo_configuration import (
     construct_universal_feature_views,
 )
-from tests.integration.feature_repos.universal.entities import (
+from tests.universal.feature_repos.universal.entities import (
     customer,
     driver,
     location,
 )
-from tests.integration.feature_repos.universal.feature_views import conv_rate_plus_100
+from tests.universal.feature_repos.universal.feature_views import conv_rate_plus_100
 from tests.utils.test_log_creator import prepare_logs, to_logs_dataset
 
 
@@ -34,8 +34,6 @@ def test_feature_service_logging(environment, universal_data_sources, pass_as_pa
     (_, datasets, data_sources) = universal_data_sources
 
     feature_views = construct_universal_feature_views(data_sources)
-    store.apply([customer(), driver(), location(), *feature_views.values()])
-
     feature_service = FeatureService(
         name="test_service",
         features=[
@@ -47,6 +45,17 @@ def test_feature_service_logging(environment, universal_data_sources, pass_as_pa
         logging_config=LoggingConfig(
             destination=environment.data_source_creator.create_logged_features_destination()
         ),
+    )
+
+    store.apply(
+        [customer(), driver(), location(), *feature_views.values()], feature_service
+    )
+
+    # Added to handle the case that the offline store is remote
+    store.registry.apply_feature_service(feature_service, store.config.project)
+    store.registry.apply_data_source(
+        feature_service.logging_config.destination.to_data_source(),
+        store.config.project,
     )
 
     driver_df = datasets.driver_df
@@ -97,7 +106,15 @@ def test_feature_service_logging(environment, universal_data_sources, pass_as_pa
     )
 
     persisted_logs = persisted_logs[expected_columns]
+
     logs_df = logs_df[expected_columns]
+
+    # Convert timezone-aware datetime values to naive datetime values
+    logs_df[LOG_TIMESTAMP_FIELD] = logs_df[LOG_TIMESTAMP_FIELD].dt.tz_localize(None)
+    persisted_logs[LOG_TIMESTAMP_FIELD] = persisted_logs[
+        LOG_TIMESTAMP_FIELD
+    ].dt.tz_localize(None)
+
     pd.testing.assert_frame_equal(
         logs_df.sort_values(REQUEST_ID_FIELD).reset_index(drop=True),
         persisted_logs.sort_values(REQUEST_ID_FIELD).reset_index(drop=True),

@@ -50,6 +50,8 @@ class Feature:
             self._labels = labels
 
     def __eq__(self, other):
+        if not isinstance(other, Feature):
+            return False
         if self.name != other.name or self.dtype != other.dtype:
             return False
         return True
@@ -58,12 +60,18 @@ class Feature:
         return self.name < other.name
 
     def __repr__(self):
-        # return string representation of the reference
-        return f"{self.name}-{self.dtype}"
+        return (
+            f"Feature(\n"
+            f"    name={self._name!r},\n"
+            f"    dtype={self._dtype!r},\n"
+            f"    description={self._description!r},\n"
+            f"    labels={self._labels!r}\n"
+            f")"
+        )
 
     def __str__(self):
         # readable string of the reference
-        return f"Feature<{self.__repr__()}>"
+        return f"Feature<{self.name}: {self.dtype}>"
 
     @property
     def name(self):

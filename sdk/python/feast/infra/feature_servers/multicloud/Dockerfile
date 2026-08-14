@@ -1,19 +1,13 @@
-FROM python:3.11
+FROM registry.access.redhat.com/ubi9/python-312-minimal:latest
 
-RUN apt update && \
-        apt install -y \
-        jq \
-        python3-dev \
-        build-essential
+USER 0
+RUN microdnf install -y git gcc libpq-devel python3.12-devel && microdnf clean all
+USER 1001
 
-RUN pip install pip --upgrade
-RUN pip install "feast[aws,gcp,snowflake,redis,go,mysql,postgres]"
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+ENV UV_CACHE_DIR=/tmp/uv-cache
+COPY requirements.txt requirements.txt
+RUN uv pip install -r requirements.txt
 
-
-RUN apt update
-RUN apt install -y -V ca-certificates lsb-release wget
-RUN wget https://apache.jfrog.io/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
-RUN apt install -y -V ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
-RUN apt update
-RUN apt -y install libarrow-dev
-RUN mkdir -m 775 /.cache
+# modify permissions to support running with a random uid
+RUN chmod g+w $(python -c "import feast.ui as ui; print(ui.__path__)" | tr -d "[']")/build/projects-list.json

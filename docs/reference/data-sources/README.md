@@ -34,8 +34,16 @@ Please see [Data Source](../../getting-started/concepts/data-ingestion.md) for a
 [kinesis.md](kinesis.md)
 {% endcontent-ref %}
 
+{% content-ref url="couchbase.md" %}
+[couchbase.md](couchbase.md)
+{% endcontent-ref %}
+
 {% content-ref url="spark.md" %}
 [spark.md](spark.md)
+{% endcontent-ref %}
+
+{% content-ref url="iceberg.md" %}
+[iceberg.md](iceberg.md)
 {% endcontent-ref %}
 
 {% content-ref url="postgres.md" %}
@@ -48,4 +56,24 @@ Please see [Data Source](../../getting-started/concepts/data-ingestion.md) for a
 
 {% content-ref url="mssql.md" %}
 [mssql.md](mssql.md)
+{% endcontent-ref %}
+
+{% content-ref url="clickhouse.md" %}
+[clickhouse.md](clickhouse.md)
+{% endcontent-ref %}
+
+{% content-ref url="athena.md" %}
+[athena.md](athena.md)
+{% endcontent-ref %}
+
+{% content-ref url="oracle.md" %}
+[oracle.md](oracle.md)
+{% endcontent-ref %}
+
+{% content-ref url="ray.md" %}
+[ray.md](ray.md)
+{% endcontent-ref %}
+
+{% content-ref url="mongodb.md" %}
+[mongodb.md](mongodb.md)
 {% endcontent-ref %}

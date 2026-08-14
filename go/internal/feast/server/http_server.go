@@ -2,16 +2,24 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"runtime"
+	"strconv"
+	"time"
+
 	"github.com/feast-dev/feast/go/internal/feast"
 	"github.com/feast-dev/feast/go/internal/feast/model"
+	"github.com/feast-dev/feast/go/internal/feast/onlineserving"
 	"github.com/feast-dev/feast/go/internal/feast/server/logging"
 	"github.com/feast-dev/feast/go/protos/feast/serving"
 	prototypes "github.com/feast-dev/feast/go/protos/feast/types"
 	"github.com/feast-dev/feast/go/types"
-	"net/http"
-	"time"
+	"github.com/rs/zerolog/log"
+
+	"github.com/feast-dev/feast/go/internal/feast/metrics"
 )
 
 type httpServer struct {
@@ -138,23 +146,45 @@ func NewHttpServer(fs *feast.FeatureStore, loggingService *logging.LoggingServic
 }
 
 func (s *httpServer) getOnlineFeatures(w http.ResponseWriter, r *http.Request) {
+	var err error
+
+	ctx := r.Context()
+	ctx, span := tracer.Start(r.Context(), "server.getOnlineFeatures")
+	defer span.End()
+
+	logSpanContext := LogWithSpanContext(span)
+
 	if r.Method != "POST" {
 		http.NotFound(w, r)
 		return
 	}
 
+	statusQuery := r.URL.Query().Get("status")
+
+	status := false
+	if statusQuery != "" {
+		status, err = strconv.ParseBool(statusQuery)
+		if err != nil {
+			logSpanContext.Error().Err(err).Msg("Error parsing status query parameter")
+			writeJSONError(w, fmt.Errorf("Error parsing status query parameter: %+v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
 	decoder := json.NewDecoder(r.Body)
 	var request getOnlineFeaturesRequest
-	err := decoder.Decode(&request)
+	err = decoder.Decode(&request)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error decoding JSON request data: %+v", err), http.StatusInternalServerError)
+		logSpanContext.Error().Err(err).Msg("Error decoding JSON request data")
+		writeJSONError(w, fmt.Errorf("Error decoding JSON request data: %+v", err), http.StatusInternalServerError)
 		return
 	}
 	var featureService *model.FeatureService
 	if request.FeatureService != nil {
 		featureService, err = s.fs.GetFeatureService(*request.FeatureService)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Error getting feature service from registry: %+v", err), http.StatusInternalServerError)
+			logSpanContext.Error().Err(err).Msg("Error getting feature service from registry")
+			writeJSONError(w, fmt.Errorf("Error getting feature service from registry: %+v", err), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -168,7 +198,7 @@ func (s *httpServer) getOnlineFeatures(w http.ResponseWriter, r *http.Request) {
 	}
 
 	featureVectors, err := s.fs.GetOnlineFeatures(
-		r.Context(),
+		ctx,
 		request.Features,
 		featureService,
 		entitiesProto,
@@ -176,7 +206,8 @@ func (s *httpServer) getOnlineFeatures(w http.ResponseWriter, r *http.Request) {
 		request.FullFeatureNames)
 
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error getting feature vector: %+v", err), http.StatusInternalServerError)
+		logSpanContext.Error().Err(err).Msg("Error getting feature vector")
+		writeJSONError(w, fmt.Errorf("Error getting feature vector: %+v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -185,17 +216,19 @@ func (s *httpServer) getOnlineFeatures(w http.ResponseWriter, r *http.Request) {
 	for _, vector := range featureVectors {
 		featureNames = append(featureNames, vector.Name)
 		result := make(map[string]interface{})
-		var statuses []string
-		for _, status := range vector.Statuses {
-			statuses = append(statuses, status.String())
-		}
-		var timestamps []string
-		for _, timestamp := range vector.Timestamps {
-			timestamps = append(timestamps, timestamp.AsTime().Format(time.RFC3339))
-		}
+		if status {
+			var statuses []string
+			for _, status := range vector.Statuses {
+				statuses = append(statuses, status.String())
+			}
+			var timestamps []string
+			for _, timestamp := range vector.Timestamps {
+				timestamps = append(timestamps, timestamp.AsTime().Format(time.RFC3339))
+			}
 
-		result["statuses"] = statuses
-		result["event_timestamps"] = timestamps
+			result["statuses"] = statuses
+			result["event_timestamps"] = timestamps
+		}
 		// Note, that vector.Values is an Arrow Array, but this type implements JSON Marshaller.
 		// So, it's not necessary to pre-process it in any way.
 		result["values"] = vector.Values
@@ -210,19 +243,21 @@ func (s *httpServer) getOnlineFeatures(w http.ResponseWriter, r *http.Request) {
 		"results": results,
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+
 	err = json.NewEncoder(w).Encode(response)
 
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error encoding response: %+v", err), http.StatusInternalServerError)
+		logSpanContext.Error().Err(err).Msg("Error encoding response")
+		writeJSONError(w, fmt.Errorf("Error encoding response: %+v", err), http.StatusInternalServerError)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
 
 	if featureService != nil && featureService.LoggingConfig != nil && s.loggingService != nil {
 		logger, err := s.loggingService.GetOrCreateLogger(featureService)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Couldn't instantiate logger for feature service %s: %+v", featureService.Name, err), http.StatusInternalServerError)
+			logSpanContext.Error().Err(err).Msgf("Couldn't instantiate logger for feature service %s", featureService.Name)
+			writeJSONError(w, fmt.Errorf("Couldn't instantiate logger for feature service %s: %+v", featureService.Name, err), http.StatusInternalServerError)
 			return
 		}
 
@@ -234,7 +269,8 @@ func (s *httpServer) getOnlineFeatures(w http.ResponseWriter, r *http.Request) {
 		for _, vector := range featureVectors[len(request.Entities):] {
 			values, err := types.ArrowValuesToProtoValues(vector.Values)
 			if err != nil {
-				http.Error(w, fmt.Sprintf("Couldn't convert arrow values into protobuf: %+v", err), http.StatusInternalServerError)
+				logSpanContext.Error().Err(err).Msg("Couldn't convert arrow values into protobuf")
+				writeJSONError(w, fmt.Errorf("Couldn't convert arrow values into protobuf: %+v", err), http.StatusInternalServerError)
 				return
 			}
 			featureVectorProtos = append(featureVectorProtos, &serving.GetOnlineFeaturesResponse_FeatureVector{
@@ -246,21 +282,152 @@ func (s *httpServer) getOnlineFeatures(w http.ResponseWriter, r *http.Request) {
 
 		err = logger.Log(entitiesProto, featureVectorProtos, featureNames[len(request.Entities):], requestContextProto, requestId)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("LoggerImpl error[%s]: %+v", featureService.Name, err), http.StatusInternalServerError)
+			writeJSONError(w, fmt.Errorf("LoggerImpl error[%s]: %+v", featureService.Name, err), http.StatusInternalServerError)
 			return
 		}
 	}
+
+	go releaseCGOMemory(featureVectors)
+}
+
+func releaseCGOMemory(featureVectors []*onlineserving.FeatureVector) {
+	for _, vector := range featureVectors {
+		vector.Values.Release()
+	}
+}
+
+func logStackTrace() {
+	// Start with a small buffer and grow it until the full stack trace fits.
+	buf := make([]byte, 1024)
+	for {
+		stackSize := runtime.Stack(buf, false)
+		if stackSize < len(buf) {
+			// The stack trace fits in the buffer, so we can log it now.
+			log.Error().Str("stack_trace", string(buf[:stackSize])).Msg("")
+			return
+		}
+		// The stack trace doesn't fit in the buffer, so we need to grow the buffer and try again.
+		buf = make([]byte, 2*len(buf))
+	}
+}
+
+func writeJSONError(w http.ResponseWriter, err error, statusCode int) {
+	errMap := map[string]interface{}{
+		"error":       fmt.Sprintf("%+v", err),
+		"status_code": statusCode,
+	}
+	errJSON, _ := json.Marshal(errMap)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	w.Write(errJSON)
+}
+
+func recoverMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error().Err(fmt.Errorf("Panic recovered: %v", r)).Msg("A panic occurred in the server")
+				// Log the stack trace
+				logStackTrace()
+
+				writeJSONError(w, fmt.Errorf("Internal Server Error: %v", r), http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusWriter) Write(b []byte) (int, error) {
+	if w.status == 0 {
+		w.status = 200
+	}
+	n, err := w.ResponseWriter.Write(b)
+	return n, err
+}
+
+func metricsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t0 := time.Now()
+		sw := &statusWriter{ResponseWriter: w}
+		next.ServeHTTP(sw, r)
+		duration := time.Since(t0)
+
+		if sw.status == 0 {
+			sw.status = 200
+		}
+
+		metrics.HttpMetrics.Duration(metrics.HttpLabels{
+			Method: r.Method,
+			Status: sw.status,
+			Path:   r.URL.Path,
+		}).Duration(duration)
+
+		metrics.HttpMetrics.RequestsTotal(metrics.HttpLabels{
+			Method: r.Method,
+			Status: sw.status,
+			Path:   r.URL.Path,
+		}).Inc()
+	})
 }
 
 func (s *httpServer) Serve(host string, port int) error {
-	s.server = &http.Server{Addr: fmt.Sprintf("%s:%d", host, port), Handler: nil}
-	http.HandleFunc("/get-online-features", s.getOnlineFeatures)
+	mux := http.NewServeMux()
+	mux.Handle("/get-online-features", metricsMiddleware(recoverMiddleware(http.HandlerFunc(s.getOnlineFeatures))))
+	mux.Handle("/health", metricsMiddleware(http.HandlerFunc(healthCheckHandler)))
+	s.server = &http.Server{Addr: fmt.Sprintf("%s:%d", host, port), Handler: mux, ReadTimeout: 5 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 15 * time.Second}
 	err := s.server.ListenAndServe()
 	// Don't return the error if it's caused by graceful shutdown using Stop()
 	if err == http.ErrServerClosed {
 		return nil
 	}
+	log.Fatal().Stack().Err(err).Msg("Failed to start HTTP server")
 	return err
+}
+
+func (s *httpServer) ServeTLS(host string, port int, certFile string, keyFile string) error {
+	mux := http.NewServeMux()
+	mux.Handle("/get-online-features", metricsMiddleware(recoverMiddleware(http.HandlerFunc(s.getOnlineFeatures))))
+	mux.Handle("/health", metricsMiddleware(http.HandlerFunc(healthCheckHandler)))
+	s.server = &http.Server{
+		Addr:         fmt.Sprintf("%s:%d", host, port),
+		Handler:      mux,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  15 * time.Second,
+		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			CurvePreferences: []tls.CurveID{
+				tls.CurveP256,
+				tls.X25519MLKEM768,
+				//tls.SecP256r1MLKEM768,  // Only available in Go 1.26
+			},
+		},
+	}
+	err := s.server.ListenAndServeTLS(certFile, keyFile)
+	// Don't return the error if it's caused by graceful shutdown using Stop()
+	if err == http.ErrServerClosed {
+		return nil
+	}
+	log.Fatal().Stack().Err(err).Msg("Failed to start HTTPS server")
+	return err
+}
+
+func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "Healthy")
 }
 func (s *httpServer) Stop() error {
 	if s.server != nil {

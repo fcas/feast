@@ -18,13 +18,12 @@ offline_store:
 ```
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterator, Optional, Set
 
 import numpy as np
 import pandas as pd
 import pyarrow
-from pytz import utc
 
 from feast.infra.offline_stores.contrib.trino_offline_store.trino_queries import Trino
 from feast.infra.offline_stores.contrib.trino_offline_store.trino_type_map import (
@@ -46,6 +45,7 @@ CONNECTORS_DONT_SUPPORT_CREATE_TABLE: Set[str] = {
     "thrift",
     "tpcds",
     "tpch",
+    "qdrant",
 }
 CONNECTORS_WITHOUT_WITH_STATEMENTS: Set[str] = {
     "bigquery",
@@ -56,6 +56,7 @@ CONNECTORS_WITHOUT_WITH_STATEMENTS: Set[str] = {
     "oracle",
     "redshift",
     "memsql",
+    "lakehouse",
 }
 
 CREATE_SCHEMA_QUERY_TEMPLATE = """
@@ -115,7 +116,7 @@ def format_pandas_row(df: pd.DataFrame) -> str:
 
     def _format_value(row: pd.Series, schema: Dict[str, Any]) -> str:
         formated_values = []
-        for row_name, row_value in row.iteritems():
+        for row_name, row_value in row.items():
             if schema[row_name].startswith("timestamp"):
                 if isinstance(row_value, datetime):
                     row_value = format_datetime(row_value)
@@ -141,7 +142,7 @@ def format_pandas_row(df: pd.DataFrame) -> str:
 
 def format_datetime(t: datetime) -> str:
     if t.tzinfo:
-        t = t.astimezone(tz=utc)
+        t = t.astimezone(tz=timezone.utc)
     return t.strftime("%Y-%m-%d %H:%M:%S.%f")
 
 

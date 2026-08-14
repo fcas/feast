@@ -128,6 +128,18 @@ Stream Feature View
 .. autoclass:: feast.stream_feature_view.StreamFeatureView
     :members:
 
+Label View
+----------------------
+
+.. autoclass:: feast.labeling.label_view.LabelView
+    :members:
+
+Conflict Policy
+----------------------
+
+.. autoclass:: feast.labeling.conflict_policy.ConflictPolicy
+    :members:
+
 Field
 ==================
 
@@ -180,12 +192,6 @@ S3 Registry Store
 -----------------------
 
 .. autoclass:: feast.infra.registry.s3.S3RegistryStore
-    :members:
-
-PostgreSQL Registry Store
------------------------
-
-.. autoclass:: feast.infra.registry.contrib.postgres.postgres_registry_store.PostgreSQLRegistryStore
     :members:
 
 Provider
@@ -365,28 +371,28 @@ Snowflake Online Store
 PostgreSQL Online Store
 -----------------------
 
-.. autoclass:: feast.infra.online_stores.contrib.postgres.PostgreSQLOnlineStore
+.. autoclass:: feast.infra.online_stores.postgres_online_store.PostgreSQLOnlineStore
     :members:
 
-.. autoclass:: feast.infra.online_stores.contrib.postgres.PostgreSQLOnlineStoreConfig
+.. autoclass:: feast.infra.online_stores.postgres_online_store.PostgreSQLOnlineStoreConfig
     :members:
 
 HBase Online Store
 -----------------------
 
-.. autoclass:: feast.infra.online_stores.contrib.hbase_online_store.hbase.HbaseOnlineStore
+.. autoclass:: feast.infra.online_stores.hbase_online_store.hbase.HbaseOnlineStore
     :members:
 
-.. autoclass:: feast.infra.online_stores.contrib.hbase_online_store.hbase.HbaseOnlineStoreConfig
+.. autoclass:: feast.infra.online_stores.hbase_online_store.hbase.HbaseOnlineStoreConfig
     :members:
 
 Cassandra Online Store
 -----------------------
 
-.. autoclass:: feast.infra.online_stores.contrib.cassandra_online_store.cassandra_online_store.CassandraOnlineStore
+.. autoclass:: feast.infra.online_stores.cassandra_online_store.cassandra_online_store.CassandraOnlineStore
     :members:
 
-.. autoclass:: feast.infra.online_stores.contrib.cassandra_online_store.cassandra_online_store.CassandraOnlineStoreConfig
+.. autoclass:: feast.infra.online_stores.cassandra_online_store.cassandra_online_store.CassandraOnlineStoreConfig
     :members:
 
 Batch Materialization Engine
@@ -459,4 +465,60 @@ Snowflake Engine
     :members:
 
 .. autoclass:: feast.infra.materialization.contrib.spark.spark_materialization_engine.SparkMaterializationJob
+    :members:
+
+Permission
+============================
+
+.. autoclass:: feast.permissions.permission.Permission
+    :members:
+
+.. autoclass:: feast.permissions.action.AuthzedAction
+    :members:
+
+.. autoclass:: feast.permissions.policy.Policy
+    :members:
+
+.. autofunction:: feast.permissions.enforcer.enforce_policy
+
+Auth Config
+---------------------------
+
+.. autoclass:: feast.permissions.auth_model.AuthConfig
+    :members:
+
+.. autoclass:: feast.permissions.auth_model.KubernetesAuthConfig
+    :members:
+
+.. autoclass:: feast.permissions.auth_model.OidcAuthConfig
+    :members:
+
+Auth Manager
+---------------------------
+
+.. autoclass:: feast.permissions.auth.AuthManager
+    :members:
+
+.. autoclass:: feast.permissions.auth.token_parser.TokenParser
+    :members:
+
+.. autoclass:: feast.permissions.auth.token_extractor.TokenExtractor
+    :members:
+
+.. autoclass:: feast.permissions.auth.kubernetes_token_parser.KubernetesTokenParser
+    :members:
+
+.. autoclass:: feast.permissions.auth.oidc_token_parser.OidcTokenParser
+    :members:
+
+Auth Client Manager
+---------------------------
+
+.. autoclass:: feast.permissions.client.auth_client_manager.AuthenticationClientManager
+    :members:
+
+.. autoclass:: feast.permissions.client.kubernetes_auth_client_manager.KubernetesAuthClientManager
+    :members:
+
+.. autoclass:: feast.permissions.client.oidc_authentication_client_manager.OidcAuthClientManager
     :members:

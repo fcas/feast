@@ -7,20 +7,28 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
+   feast.aggregation
+   feast.api
+   feast.cli
+   feast.dbt
    feast.diff
    feast.dqm
+   feast.embedded_go
    feast.infra
-   feast.loaders
+   feast.lineage
+   feast.openlineage
+   feast.permissions
    feast.protos
+   feast.transformation
    feast.ui
 
 Submodules
 ----------
 
-feast.aggregation module
-------------------------
+feast.arrow\_error\_handler module
+----------------------------------
 
-.. automodule:: feast.aggregation
+.. automodule:: feast.arrow_error_handler
    :members:
    :undoc-members:
    :show-inheritance:
@@ -41,14 +49,6 @@ feast.batch\_feature\_view module
    :undoc-members:
    :show-inheritance:
 
-feast.cli module
-----------------
-
-.. automodule:: feast.cli
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 feast.constants module
 ----------------------
 
@@ -65,10 +65,26 @@ feast.data\_format module
    :undoc-members:
    :show-inheritance:
 
+feast.demos module
+------------------
+
+.. automodule:: feast.demos
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 feast.data\_source module
 -------------------------
 
 .. automodule:: feast.data_source
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+feast.document\_labeling module
+-------------------------------
+
+.. automodule:: feast.document_labeling
    :members:
    :undoc-members:
    :show-inheritance:
@@ -185,6 +201,14 @@ feast.flags\_helper module
    :undoc-members:
    :show-inheritance:
 
+feast.grpc\_error\_interceptor module
+-------------------------------------
+
+.. automodule:: feast.grpc_error_interceptor
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 feast.importer module
 ---------------------
 
@@ -209,6 +233,22 @@ feast.names module
    :undoc-members:
    :show-inheritance:
 
+feast.nlp\_test\_data module
+----------------------------
+
+.. automodule:: feast.nlp_test_data
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+feast.offline\_server module
+----------------------------
+
+.. automodule:: feast.offline_server
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 feast.on\_demand\_feature\_view module
 --------------------------------------
 
@@ -225,6 +265,14 @@ feast.online\_response module
    :undoc-members:
    :show-inheritance:
 
+feast.project module
+--------------------
+
+.. automodule:: feast.project
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 feast.project\_metadata module
 ------------------------------
 
@@ -237,6 +285,22 @@ feast.proto\_json module
 ------------------------
 
 .. automodule:: feast.proto_json
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+feast.rag\_retriever module
+---------------------------
+
+.. automodule:: feast.rag_retriever
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+feast.registry\_server module
+-----------------------------
+
+.. automodule:: feast.registry_server
    :members:
    :undoc-members:
    :show-inheritance:
@@ -265,10 +329,10 @@ feast.repo\_operations module
    :undoc-members:
    :show-inheritance:
 
-feast.repo\_upgrade module
---------------------------
+feast.rest\_error\_handler module
+---------------------------------
 
-.. automodule:: feast.repo_upgrade
+.. automodule:: feast.rest_error_handler
    :members:
    :undoc-members:
    :show-inheritance:
@@ -281,10 +345,26 @@ feast.saved\_dataset module
    :undoc-members:
    :show-inheritance:
 
+feast.ssl\_ca\_trust\_store\_setup module
+-----------------------------------------
+
+.. automodule:: feast.ssl_ca_trust_store_setup
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 feast.stream\_feature\_view module
 ----------------------------------
 
 .. automodule:: feast.stream_feature_view
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+feast.torch\_wrapper module
+---------------------------
+
+.. automodule:: feast.torch_wrapper
    :members:
    :undoc-members:
    :show-inheritance:
@@ -321,14 +401,6 @@ feast.ui\_server module
    :undoc-members:
    :show-inheritance:
 
-feast.usage module
-------------------
-
-.. automodule:: feast.usage
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 feast.utils module
 ------------------
 
@@ -341,6 +413,14 @@ feast.value\_type module
 ------------------------
 
 .. automodule:: feast.value_type
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+feast.vector\_store module
+--------------------------
+
+.. automodule:: feast.vector_store
    :members:
    :undoc-members:
    :show-inheritance:

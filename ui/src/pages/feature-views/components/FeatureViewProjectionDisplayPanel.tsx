@@ -1,45 +1,57 @@
 import React from "react";
-import { EuiBasicTable, EuiPanel, EuiText, EuiTitle } from "@elastic/eui";
-
+import {
+  EuiBadge,
+  EuiBasicTable,
+  EuiPanel,
+  EuiSpacer,
+  EuiTitle,
+} from "@elastic/eui";
 import { useParams } from "react-router-dom";
 import EuiCustomLink from "../../../components/EuiCustomLink";
 import { feast } from "../../../protos";
 
-interface RequestDataDisplayPanelProps extends feast.core.IFeatureViewProjection { }
+interface RequestDataDisplayPanelProps
+  extends feast.core.IFeatureViewProjection {}
 
-const FeatureViewProjectionDisplayPanel = (featureViewProjection: RequestDataDisplayPanelProps) => {
+const FeatureViewProjectionDisplayPanel = (
+  featureViewProjection: RequestDataDisplayPanelProps,
+) => {
   const { projectName } = useParams();
+  const isLabelView = (featureViewProjection as any).viewType === "labelView";
+  const viewPath = isLabelView ? "label-view" : "feature-view";
 
   const columns = [
     {
       name: "Column Name",
-      field: "name"
+      field: "name",
     },
     {
       name: "Type",
       field: "valueType",
       render: (valueType: any) => {
-        return feast.types.ValueType.Enum[valueType];
+        if (typeof valueType === "string") return valueType;
+        return feast.types.ValueType.Enum[valueType] || String(valueType || "");
       },
     },
   ];
 
   return (
     <EuiPanel hasBorder={true}>
-      <EuiText size="xs">
-        <span>Feature View</span>
-      </EuiText>
+      <EuiBadge color={isLabelView ? "#e6570e" : "hollow"}>
+        {isLabelView ? "label view" : "feature view"}
+      </EuiBadge>
+      <EuiSpacer size="xs" />
       <EuiTitle size="s">
         <EuiCustomLink
-          href={`${process.env.PUBLIC_URL || ""}/p/${projectName}/feature-view/${featureViewProjection.featureViewName}`}
-          to={`${process.env.PUBLIC_URL || ""}/p/${projectName}/feature-view/${featureViewProjection.featureViewName}`}
+          to={`/p/${projectName}/${viewPath}/${featureViewProjection.featureViewName}`}
         >
           {featureViewProjection?.featureViewName}
         </EuiCustomLink>
       </EuiTitle>
+      <EuiSpacer size="s" />
       <EuiBasicTable
         columns={columns}
-        items={featureViewProjection?.featureColumns!}
+        items={featureViewProjection?.featureColumns || []}
       />
     </EuiPanel>
   );

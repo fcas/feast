@@ -17,7 +17,7 @@ from feast.infra.offline_stores.contrib.spark_offline_store.spark_source import 
     SavedDatasetSparkStorage,
     SparkSource,
 )
-from tests.integration.feature_repos.universal.data_source_creator import (
+from tests.universal.feature_repos.universal.data_source_creator import (
     DataSourceCreator,
 )
 
@@ -35,6 +35,8 @@ class SparkDataSourceCreator(DataSourceCreator):
             "spark.eventLog.enabled": "false",
             "spark.sql.parser.quotedRegexColumnNames": "true",
             "spark.sql.session.timeZone": "UTC",
+            "spark.driver.host": "127.0.0.1",
+            "spark.driver.bindAddress": "127.0.0.1",
         }
         if not self.spark_offline_store_config:
             self.create_offline_store_config()
@@ -69,7 +71,6 @@ class SparkDataSourceCreator(DataSourceCreator):
         self,
         df: pd.DataFrame,
         destination_name: str,
-        event_timestamp_column="ts",
         created_timestamp_column="created_ts",
         field_mapping: Optional[Dict[str, str]] = None,
         timestamp_field: Optional[str] = "ts",

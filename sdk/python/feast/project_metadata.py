@@ -18,7 +18,6 @@ from google.protobuf.json_format import MessageToJson
 from typeguard import typechecked
 
 from feast.protos.feast.core.Registry_pb2 import ProjectMetadata as ProjectMetadataProto
-from feast.usage import log_exceptions
 
 
 @typechecked
@@ -34,7 +33,6 @@ class ProjectMetadata:
     project_name: str
     project_uuid: str
 
-    @log_exceptions
     def __init__(
         self,
         *args,
@@ -62,9 +60,7 @@ class ProjectMetadata:
 
     def __eq__(self, other):
         if not isinstance(other, ProjectMetadata):
-            raise TypeError(
-                "Comparisons should only involve ProjectMetadata class objects."
-            )
+            return False
 
         if (
             self.project_name != other.project_name

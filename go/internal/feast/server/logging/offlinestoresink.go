@@ -3,15 +3,14 @@ package logging
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
 
-	"github.com/apache/arrow/go/v8/arrow"
-	"github.com/apache/arrow/go/v8/arrow/array"
-	"github.com/apache/arrow/go/v8/parquet"
-	"github.com/apache/arrow/go/v8/parquet/pqarrow"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/parquet"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/google/uuid"
 )
 
@@ -33,7 +32,7 @@ func (s *OfflineStoreSink) getOrCreateDatasetDir() (string, error) {
 	if s.datasetDir != "" {
 		return s.datasetDir, nil
 	}
-	dir, err := ioutil.TempDir("", "*")
+	dir, err := os.MkdirTemp("", "*")
 	if err != nil {
 		return "", err
 	}

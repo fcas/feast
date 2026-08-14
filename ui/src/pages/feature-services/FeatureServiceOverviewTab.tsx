@@ -15,11 +15,14 @@ import React from "react";
 import { useParams } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
 import FeaturesInServiceList from "../../components/FeaturesInServiceDisplay";
+import PermissionsDisplay from "../../components/PermissionsDisplay";
 import TagsDisplay from "../../components/TagsDisplay";
 import { encodeSearchQueryString } from "../../hooks/encodeSearchQueryString";
 import FeatureViewEdgesList from "../entities/FeatureViewEdgesList";
 import useLoadFeatureService from "./useLoadFeatureService";
 import { toDate } from "../../utils/timestamp";
+import { getEntityPermissions } from "../../utils/permissionUtils";
+import { FEAST_FCO_TYPES } from "../../parsers/types";
 
 const FeatureServiceOverviewTab = () => {
   let { featureServiceName, projectName } = useParams();
@@ -31,11 +34,19 @@ const FeatureServiceOverviewTab = () => {
   const isEmpty = data === undefined;
 
   let numFeatures = 0;
-  let numFeatureViews = 0;
+  let numLabels = 0;
+  const featureProjections: any[] = [];
+  const labelProjections: any[] = [];
   if (data) {
-    data?.spec?.features?.forEach((featureView) => {
-      numFeatureViews += 1;
-      numFeatures += featureView?.featureColumns!.length;
+    data?.spec?.features?.forEach((featureView: any) => {
+      const columnCount = (featureView?.featureColumns || []).length;
+      if (featureView.viewType === "labelView") {
+        numLabels += columnCount;
+        labelProjections.push(featureView);
+      } else {
+        numFeatures += columnCount;
+        featureProjections.push(featureView);
+      }
     });
   }
 
@@ -51,10 +62,10 @@ const FeatureServiceOverviewTab = () => {
       {isEmpty && <p>No feature service with name: {featureServiceName}</p>}
       {isError && <p>Error loading feature service: {featureServiceName}</p>}
       {isSuccess && data && (
-        <React.Fragment>
+        <EuiFlexGroup direction="column">
           <EuiFlexGroup alignItems="center">
             <EuiFlexItem grow={false}>
-              <EuiStat title={`${numFeatures}`} description="Total Features" />
+              <EuiStat title={`${numFeatures}`} description="Features" />
             </EuiFlexItem>
             <EuiFlexItem>
               <EuiTextAlign textAlign="center">
@@ -63,16 +74,14 @@ const FeatureServiceOverviewTab = () => {
             </EuiFlexItem>
             <EuiFlexItem>
               <EuiStat
-                title={`${numFeatureViews}`}
+                title={`${featureProjections.length}`}
                 description="Feature Views"
               />
             </EuiFlexItem>
             {data?.meta?.lastUpdatedTimestamp ? (
               <EuiFlexItem>
                 <EuiStat
-                  title={`${toDate(data?.meta?.lastUpdatedTimestamp!).toLocaleDateString(
-                    "en-CA"
-                  )}`}
+                  title={`${toDate(data?.meta?.lastUpdatedTimestamp!).toLocaleDateString("en-CA")}`}
                   description="Last updated"
                 />
               </EuiFlexItem>
@@ -89,14 +98,43 @@ const FeatureServiceOverviewTab = () => {
                   <h2>Features</h2>
                 </EuiTitle>
                 <EuiHorizontalRule margin="xs" />
-                {data?.spec?.features ? (
-                  <FeaturesInServiceList featureViews={data?.spec?.features} />
+                {featureProjections.length > 0 ? (
+                  <FeaturesInServiceList featureViews={featureProjections} />
                 ) : (
                   <EuiText>
                     No features specified for this feature service.
                   </EuiText>
                 )}
               </EuiPanel>
+              {labelProjections.length > 0 && (
+                <React.Fragment>
+                  <EuiSpacer size="l" />
+                  <EuiFlexGroup alignItems="center">
+                    <EuiFlexItem grow={false}>
+                      <EuiStat title={`${numLabels}`} description="Labels" />
+                    </EuiFlexItem>
+                    <EuiFlexItem>
+                      <EuiTextAlign textAlign="center">
+                        <p>from</p>
+                      </EuiTextAlign>
+                    </EuiFlexItem>
+                    <EuiFlexItem>
+                      <EuiStat
+                        title={`${labelProjections.length}`}
+                        description="Label Views"
+                      />
+                    </EuiFlexItem>
+                  </EuiFlexGroup>
+                  <EuiSpacer size="m" />
+                  <EuiPanel hasBorder={true}>
+                    <EuiTitle size="xs">
+                      <h2>Labels</h2>
+                    </EuiTitle>
+                    <EuiHorizontalRule margin="xs" />
+                    <FeaturesInServiceList featureViews={labelProjections} />
+                  </EuiPanel>
+                </React.Fragment>
+              )}
             </EuiFlexItem>
             <EuiFlexItem grow={1}>
               <EuiPanel hasBorder={true} grow={false}>
@@ -109,7 +147,7 @@ const FeatureServiceOverviewTab = () => {
                     tags={data.spec.tags}
                     createLink={(key, value) => {
                       return (
-                        `${process.env.PUBLIC_URL || ""}/p/${projectName}/feature-service?` +
+                        `/p/${projectName}/feature-service?` +
                         encodeSearchQueryString(`${key}:${value}`)
                       );
                     }}
@@ -133,7 +171,7 @@ const FeatureServiceOverviewTab = () => {
                             color="primary"
                             onClick={() => {
                               navigate(
-                                `${process.env.PUBLIC_URL || ""}/p/${projectName}/entity/${entity.name}`
+                                `/p/${projectName}/entity/${entity.name}`,
                               );
                             }}
                             onClickAriaLabel={entity.name}
@@ -152,22 +190,56 @@ const FeatureServiceOverviewTab = () => {
               <EuiSpacer size="m" />
               <EuiPanel hasBorder={true}>
                 <EuiTitle size="xs">
-                  <h3>All Feature Views</h3>
+                  <h3>All Views</h3>
                 </EuiTitle>
                 <EuiHorizontalRule margin="xs" />
                 {data?.spec?.features?.length! > 0 ? (
                   <FeatureViewEdgesList
-                    fvNames={data?.spec?.features?.map((f) => {
-                      return f.featureViewName!;
-                    })!}
+                    fvNames={
+                      data?.spec?.features?.map((f: any) => {
+                        return f.featureViewName!;
+                      })!
+                    }
+                    viewTypes={
+                      data?.spec?.features?.reduce(
+                        (acc: Record<string, string>, f: any) => {
+                          if (f.featureViewName) {
+                            acc[f.featureViewName] =
+                              f.viewType || "featureView";
+                          }
+                          return acc;
+                        },
+                        {},
+                      ) || {}
+                    }
                   />
                 ) : (
                   <EuiText>No feature views in this feature service</EuiText>
                 )}
               </EuiPanel>
+              <EuiSpacer size="m" />
+              <EuiPanel hasBorder={true}>
+                <EuiTitle size="xs">
+                  <h3>Permissions</h3>
+                </EuiTitle>
+                <EuiHorizontalRule margin="xs" />
+                {data?.permissions ? (
+                  <PermissionsDisplay
+                    permissions={getEntityPermissions(
+                      data.permissions,
+                      FEAST_FCO_TYPES.featureService,
+                      fsName,
+                    )}
+                  />
+                ) : (
+                  <EuiText>
+                    No permissions defined for this feature service.
+                  </EuiText>
+                )}
+              </EuiPanel>
             </EuiFlexItem>
           </EuiFlexGroup>
-        </React.Fragment>
+        </EuiFlexGroup>
       )}
     </React.Fragment>
   );

@@ -35,6 +35,18 @@ Options:
 
 This will spin up a Web UI on localhost which automatically refreshes its view of the registry every `registry_ttl_sec`
 
+#### Curl Generator Feature Server URL
+
+The Curl Generator uses a default Feature Server URL when building the example curl command. You can configure
+this default at build time using:
+
+```bash
+REACT_APP_FEAST_FEATURE_SERVER_URL="http://your-server:6566"
+```
+
+If this environment variable is not set, the UI falls back to `http://localhost:6566`. A user-edited value in
+the UI is still stored in localStorage and will take precedence for that browser.
+
 ### Importing as a module to integrate with an existing React App
 
 This is the recommended way to use Feast UI for teams maintaining their own internal UI for their deployment of Feast.
@@ -45,11 +57,14 @@ Start with bootstrapping a React app with `create-react-app`
 npx create-react-app your-feast-ui
 ```
 
-Then, in your app folder, install Feast UI and its peer dependencies. Assuming you use yarn
+Then, in your app folder, install Feast UI and optionally its peer dependencies. Assuming you use yarn
 
 ```
 yarn add @feast-dev/feast-ui
-yarn add @elastic/eui @elastic/datemath @emotion/react moment prop-types inter-ui react-query react-router-dom use-query-params zod typescript query-string d3 @types/d3
+# For custom UI using the Elastic UI Framework (optional):
+yarn add @elastic/eui
+# For general custom styling (optional):
+yarn add @emotion/react
 ```
 
 Edit `index.js` in the React app to use Feast UI.
@@ -70,7 +85,7 @@ ReactDOM.render(
 );
 ```
 
-When you start the React app, it will look for `project-list.json` to find a list of your projects. The JSON should looks something like this.
+When you start the React app, it will look for `projects-list.json` to find a list of your projects. The JSON should look something like this.
 
 ```json
 {
@@ -97,9 +112,9 @@ yarn start
 
 The advantage of importing Feast UI as a module is in the ease of customization. The `<FeastUI>` component exposes a `feastUIConfigs` prop thorough which you can customize the UI. Currently it supports a few parameters.
 
-**Fetching the Project List**
+##### Fetching the Project List
 
-You can use `projectListPromise` to provide a promise that overrides where the Feast UI fetches the project list from.
+By default, the Feast UI fetches the project list from the app root path. You can use `projectListPromise` to provide a promise that overrides where it's fetched from.
 
 ```jsx
 <FeastUI
@@ -115,11 +130,11 @@ You can use `projectListPromise` to provide a promise that overrides where the F
 />
 ```
 
-**Custom Tabs**
+##### Custom Tabs
 
 You can add custom tabs for any of the core Feast objects through the `tabsRegistry`.
 
-```
+```jsx
 const tabsRegistry = {
   RegularFeatureViewCustomTabs: [
     {
@@ -138,3 +153,12 @@ const tabsRegistry = {
 ```
 
 Examples of custom tabs can be found in the `ui/custom-tabs` folder.
+
+## Refreshing the registry
+
+The Feast UI caches registry data (projects, feature views, entities, etc.) using the registry cache. After running `feast apply` to make changes, it may take up to `cache_ttl_seconds` before the updates appear in the UI.
+
+To see changes faster:
+
+- **Lower the TTL**: Set `cache_ttl_seconds: 10` (or similar) in your `feature_store.yaml` registry config. This makes all registry consumers — including the UI — pick up changes within 10 seconds.
+- **Refresh on demand**: The UI has a **Refresh** button that explicitly invalidates the server-side registry cache (`POST /api/v1/registry/refresh`) and reloads the UI without a full page refresh.

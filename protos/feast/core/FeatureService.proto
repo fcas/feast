@@ -38,6 +38,10 @@ message FeatureServiceSpec {
 
   // (optional) if provided logging will be enabled for this feature service.
   LoggingConfig logging_config = 7;
+
+  // When true, a pre-computed feature vector is maintained per entity for this
+  // service, enabling single-read online retrieval instead of per-feature-view reads.
+  bool precompute_online = 8;
 }
 
 
@@ -61,6 +65,7 @@ message LoggingConfig {
     SnowflakeDestination snowflake_destination = 6;
     CustomDestination custom_destination = 7;
     AthenaDestination athena_destination = 8;
+    CouchbaseColumnarDestination couchbase_columnar_destination = 9;
   }
 
   message FileDestination {
@@ -95,4 +100,17 @@ message LoggingConfig {
     string kind = 1;
     map<string, string> config = 2;
   }
+
+  message CouchbaseColumnarDestination {
+    // Destination database name
+    string database = 1;
+    // Destination scope name
+    string scope = 2;
+    // Destination collection name
+    string collection = 3;
+  }
+}
+
+message FeatureServiceList {
+    repeated FeatureService featureservices = 1;
 }

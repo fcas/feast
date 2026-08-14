@@ -1,24 +1,29 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
-from pytz import utc
 
 from feast import Field
 from feast.entity import Entity
-from feast.feature_view import FeatureView
+from feast.feature_view import DUMMY_ENTITY_FIELD, FeatureView
 from feast.types import Array, Bool, Bytes, Float64, Int32, Int64, String, UnixTimestamp
+from feast.utils import _utc_now
 from tests.data.data_creator import create_basic_driver_dataset
-from tests.integration.feature_repos.integration_test_repo_config import (
+from tests.universal.feature_repos.integration_test_repo_config import (
     IntegrationTestRepoConfig,
 )
-from tests.integration.feature_repos.repo_configuration import (
+from tests.universal.feature_repos.repo_configuration import (
     construct_test_environment,
 )
-from tests.integration.feature_repos.universal.data_sources.snowflake import (
+from tests.universal.feature_repos.universal.data_sources.snowflake import (
     SnowflakeDataSourceCreator,
 )
 from tests.utils.e2e_test_validation import validate_offline_online_store_consistency
+
+pytestmark = pytest.mark.skipif(
+    not os.getenv("SNOWFLAKE_CI_DEPLOYMENT"),
+    reason="Snowflake account not configured in CI (SNOWFLAKE_CI_DEPLOYMENT not set)",
+)
 
 SNOWFLAKE_ENGINE_CONFIG = {
     "type": "snowflake.engine",
@@ -52,6 +57,7 @@ def test_snowflake_materialization_consistency(online_store):
         batch_engine=SNOWFLAKE_ENGINE_CONFIG,
     )
     snowflake_environment = construct_test_environment(snowflake_config, None)
+    snowflake_environment.setup()
 
     df = create_basic_driver_dataset()
     ds = snowflake_environment.data_source_creator.create_data_source(
@@ -112,6 +118,7 @@ def test_snowflake_materialization_consistency_internal_with_lists(
         batch_engine=SNOWFLAKE_ENGINE_CONFIG,
     )
     snowflake_environment = construct_test_environment(snowflake_config, None)
+    snowflake_environment.setup()
 
     df = create_basic_driver_dataset(Int32, feature_dtype, True, feature_is_empty_list)
     ds = snowflake_environment.data_source_creator.create_data_source(
@@ -144,10 +151,10 @@ def test_snowflake_materialization_consistency_internal_with_lists(
         split_dt = df["ts_1"][4].to_pydatetime() - timedelta(seconds=1)
 
         print(f"Split datetime: {split_dt}")
-        now = datetime.utcnow()
+        now = _utc_now()
 
         full_feature_names = True
-        start_date = (now - timedelta(hours=5)).replace(tzinfo=utc)
+        start_date = (now - timedelta(hours=5)).replace(tzinfo=timezone.utc)
         end_date = split_dt
         fs.materialize(
             feature_views=[driver_stats_fv.name],
@@ -162,7 +169,7 @@ def test_snowflake_materialization_consistency_internal_with_lists(
             "string": ["3"] * 2,
             "bytes": [b"3"] * 2,
             "bool": [False] * 2,
-            "datetime": [datetime(1981, 1, 1, tzinfo=utc)] * 2,
+            "datetime": [datetime(1981, 1, 1, tzinfo=timezone.utc)] * 2,
         }
         expected_value = [] if feature_is_empty_list else expected_values[feature_dtype]
 
@@ -176,9 +183,9 @@ def test_snowflake_materialization_consistency_internal_with_lists(
         assert actual_value is not None, f"Response: {response_dict}"
         if feature_dtype == "float":
             for actual_num, expected_num in zip(actual_value, expected_value):
-                assert (
-                    abs(actual_num - expected_num) < 1e-6
-                ), f"Response: {response_dict}, Expected: {expected_value}"
+                assert abs(actual_num - expected_num) < 1e-6, (
+                    f"Response: {response_dict}, Expected: {expected_value}"
+                )
         else:
             assert actual_value == expected_value
 
@@ -195,6 +202,7 @@ def test_snowflake_materialization_entityless_fv():
         batch_engine=SNOWFLAKE_ENGINE_CONFIG,
     )
     snowflake_environment = construct_test_environment(snowflake_config, None)
+    snowflake_environment.setup()
 
     df = create_basic_driver_dataset()
     entityless_df = df.drop("driver_id", axis=1)
@@ -218,9 +226,11 @@ def test_snowflake_materialization_entityless_fv():
         ttl=timedelta(weeks=52),
         source=ds,
     )
+    assert overall_stats_fv.entity_columns == []
 
     try:
         fs.apply([overall_stats_fv, driver])
+        assert overall_stats_fv.entity_columns == [DUMMY_ENTITY_FIELD]
 
         # materialization is run in two steps and
         # we use timestamp from generated dataframe as a split point
@@ -228,9 +238,9 @@ def test_snowflake_materialization_entityless_fv():
 
         print(f"Split datetime: {split_dt}")
 
-        now = datetime.utcnow()
+        now = _utc_now()
 
-        start_date = (now - timedelta(hours=5)).replace(tzinfo=utc)
+        start_date = (now - timedelta(hours=5)).replace(tzinfo=timezone.utc)
         end_date = split_dt
         fs.materialize(
             feature_views=[overall_stats_fv.name],

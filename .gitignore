@@ -3,6 +3,7 @@ scratch*
 
 ### Local Environment ###
 *local*.env
+tools
 
 ### Secret ###
 **/service_account.json
@@ -101,11 +102,14 @@ htmlcov/
 .cache
 nosetests.xml
 coverage.xml
+coverage.out
 *.cover
 .hypothesis/
 .pytest_cache/
 infra/scripts/*.conf
 go/internal/test/feature_repo/data/
+milvus_demo.db
+.milvus_demo.db.lock
 
 # Translations
 *.mo
@@ -153,6 +157,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+uv.lock
 
 # Spyder project settings
 .spyderproject
@@ -185,7 +190,6 @@ dmypy.json
 
 # Protos
 sdk/python/docs/html
-sdk/python/feast/protos/
 sdk/go/protos/
 go/protos/
 
@@ -224,3 +228,45 @@ ui/.vercel
 
 # Go subprocess binaries (built during feast pip package building)
 sdk/python/feast/binaries/
+
+# ignore the bin directory under feast operator.
+infra/feast-operator/bin
+
+# ignore the website build directory
+infra/website/node_modules/
+infra/website/.astro/
+infra/website/dist/
+
+# offline builds
+offline_build/
+
+# Java compiled
+*.class
+*.jar
+*.war
+*.ear
+
+# Go binaries
+*.exe
+*.exe~
+*.out
+
+# Editor swap/backup files
+*.swp
+*.swo
+*~
+\#*\#
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# AgentReady reports
+.agentready/
+
+# Claude Code project settings
+# Claude Code local state (conversation history, credentials, cache)
+.claude/settings.local.json
+.claude/todos/
+.claude/cache/

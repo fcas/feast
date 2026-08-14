@@ -1,6 +1,15 @@
+import logging
 import uuid
 from datetime import date, datetime
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import (
+    Any,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    Union,
+)
 
 import numpy as np
 import pandas as pd
@@ -31,11 +40,13 @@ from feast.infra.offline_stores.offline_store import (
     RetrievalJob,
     RetrievalMetadata,
 )
-from feast.infra.registry.registry import Registry
+from feast.infra.offline_stores.offline_utils import get_timestamp_filter_sql
+from feast.infra.registry.base_registry import BaseRegistry
 from feast.on_demand_feature_view import OnDemandFeatureView
 from feast.repo_config import FeastConfigBaseModel, RepoConfig
 from feast.saved_dataset import SavedDatasetStorage
-from feast.usage import log_exceptions_and_usage
+
+logger = logging.getLogger(__name__)
 
 
 class BasicAuthModel(FeastConfigBaseModel):
@@ -66,8 +77,8 @@ class JWTAuthModel(FeastConfigBaseModel):
 
 
 class CertificateAuthModel(FeastConfigBaseModel):
-    cert: FilePath = Field(default=None, alias="cert-file")
-    key: FilePath = Field(default=None, alias="key-file")
+    cert: Optional[FilePath] = Field(default=None, alias="cert-file")
+    key: Optional[FilePath] = Field(default=None, alias="key-file")
 
 
 CLASSES_BY_AUTH_TYPE = {
@@ -116,7 +127,7 @@ class AuthConfig(FeastConfigBaseModel):
 
         model_cls = CLASSES_BY_AUTH_TYPE[auth_type]["auth_model"]
         model = model_cls(**self.config)
-        return trino_auth_cls(**model.dict())
+        return trino_auth_cls(**model.model_dump())
 
 
 class TrinoOfflineStoreConfig(FeastConfigBaseModel):
@@ -183,6 +194,7 @@ class TrinoRetrievalJob(RetrievalJob):
         full_feature_names: bool,
         on_demand_feature_views: Optional[List[OnDemandFeatureView]] = None,
         metadata: Optional[RetrievalMetadata] = None,
+        temp_table: Optional[str] = None,
     ):
         self._query = query
         self._client = client
@@ -190,6 +202,8 @@ class TrinoRetrievalJob(RetrievalJob):
         self._full_feature_names = full_feature_names
         self._on_demand_feature_views = on_demand_feature_views or []
         self._metadata = metadata
+        self._temp_table = temp_table
+        self._cleaned_up = False
 
     @property
     def full_feature_names(self) -> bool:
@@ -199,17 +213,33 @@ class TrinoRetrievalJob(RetrievalJob):
     def on_demand_feature_views(self) -> List[OnDemandFeatureView]:
         return self._on_demand_feature_views
 
+    def _drop_temp_table(self) -> None:
+        if self._cleaned_up or not self._temp_table:
+            return
+        self._cleaned_up = True
+        try:
+            self._client.execute_query(f"DROP TABLE IF EXISTS {self._temp_table}")
+        except Exception:
+            logger.exception(
+                "Failed to drop temporary entity table %s",
+                self._temp_table,
+            )
+
+    def __del__(self) -> None:
+        self._drop_temp_table()
+
     def _to_df_internal(self, timeout: Optional[int] = None) -> pd.DataFrame:
         """Return dataset as Pandas DataFrame synchronously including on demand transforms"""
-        results = self._client.execute_query(query_text=self._query)
-        self.pyarrow_schema = results.pyarrow_schema
-        return results.to_dataframe()
+        try:
+            results = self._client.execute_query(query_text=self._query)
+            self.pyarrow_schema = results.pyarrow_schema
+            return results.to_dataframe()
+        finally:
+            self._drop_temp_table()
 
     def _to_arrow_internal(self, timeout: Optional[int] = None) -> pyarrow.Table:
         """Return payrrow dataset as synchronously including on demand transforms"""
-        return pyarrow.Table.from_pandas(
-            self._to_df_internal(timeout=timeout), schema=self.pyarrow_schema
-        )
+        return pyarrow.Table.from_pandas(self._to_df_internal(timeout=timeout))
 
     def to_sql(self) -> str:
         """Returns the SQL query that will be executed in Trino to build the historical feature table"""
@@ -236,8 +266,11 @@ class TrinoRetrievalJob(RetrievalJob):
             destination_table = f"{self._client.catalog}.{self._config.offline_store.dataset}.historical_{today}_{rand_id}"
 
         # TODO: Implement the timeout logic
-        query = f"CREATE TABLE {destination_table} AS ({self._query})"
-        self._client.execute_query(query_text=query)
+        try:
+            create_query = f"CREATE TABLE {destination_table} AS ({self._query})"
+            self._client.execute_query(query_text=create_query)
+        finally:
+            self._drop_temp_table()
         return destination_table
 
     def persist(
@@ -265,8 +298,9 @@ class TrinoRetrievalJob(RetrievalJob):
 
 
 class TrinoOfflineStore(OfflineStore):
+    supports_filter_by_created_timestamp = True
+
     @staticmethod
-    @log_exceptions_and_usage(offline_store="trino")
     def pull_latest_from_table_or_query(
         config: RepoConfig,
         data_source: DataSource,
@@ -316,15 +350,15 @@ class TrinoOfflineStore(OfflineStore):
         )
 
     @staticmethod
-    @log_exceptions_and_usage(offline_store="trino")
     def get_historical_features(
         config: RepoConfig,
         feature_views: List[FeatureView],
         feature_refs: List[str],
         entity_df: Union[pd.DataFrame, str],
-        registry: Registry,
+        registry: BaseRegistry,
         project: str,
         full_feature_names: bool = False,
+        filter_by_created_timestamp: bool = False,
     ) -> TrinoRetrievalJob:
         assert isinstance(config.offline_store, TrinoOfflineStoreConfig)
         for fv in feature_views:
@@ -376,17 +410,22 @@ class TrinoOfflineStore(OfflineStore):
         )
 
         # Generate the Trino SQL query from the query context
+        entity_table_ref = table_reference
+        if type(entity_df) is str:
+            entity_table_ref = f"({entity_df})"
         query = offline_utils.build_point_in_time_query(
             query_context,
-            left_table_query_string=table_reference,
+            left_table_query_string=entity_table_ref,
             entity_df_event_timestamp_col=entity_df_event_timestamp_col,
             entity_df_columns=entity_schema.keys(),
             query_template=MULTIPLE_FEATURE_VIEW_POINT_IN_TIME_JOIN,
             full_feature_names=full_feature_names,
+            filter_by_created_timestamp=filter_by_created_timestamp,
         )
 
         return TrinoRetrievalJob(
             query=query,
+            temp_table=table_reference if isinstance(entity_df, pd.DataFrame) else None,
             client=client,
             config=config,
             full_feature_names=full_feature_names,
@@ -402,28 +441,41 @@ class TrinoOfflineStore(OfflineStore):
         )
 
     @staticmethod
-    @log_exceptions_and_usage(offline_store="trino")
     def pull_all_from_table_or_query(
         config: RepoConfig,
         data_source: DataSource,
         join_key_columns: List[str],
         feature_name_columns: List[str],
         timestamp_field: str,
-        start_date: datetime,
-        end_date: datetime,
+        created_timestamp_column: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
     ) -> RetrievalJob:
         assert isinstance(config.offline_store, TrinoOfflineStoreConfig)
         assert isinstance(data_source, TrinoSource)
         from_expression = data_source.get_table_query_string()
 
         client = _get_trino_client(config=config)
+
+        timestamp_fields = [timestamp_field]
+        if created_timestamp_column:
+            timestamp_fields.append(created_timestamp_column)
         field_string = ", ".join(
-            join_key_columns + feature_name_columns + [timestamp_field]
+            join_key_columns + feature_name_columns + timestamp_fields
+        )
+
+        timestamp_filter = get_timestamp_filter_sql(
+            start_date,
+            end_date,
+            timestamp_field,
+            quote_fields=False,
+            cast_style="timestamp",
+            date_time_separator=" ",
         )
         query = f"""
             SELECT {field_string}
-            FROM {from_expression}
-            WHERE {timestamp_field} BETWEEN TIMESTAMP '{start_date}'  AND TIMESTAMP '{end_date}'
+            FROM ( {from_expression} )
+            WHERE {timestamp_filter}
         """
         return TrinoRetrievalJob(
             query=query,
@@ -450,9 +502,7 @@ def _upload_entity_df_and_get_entity_schema(
 ) -> Dict[str, np.dtype]:
     """Uploads a Pandas entity dataframe into a Trino table and returns the resulting table"""
     if type(entity_df) is str:
-        client.execute_query(f"CREATE TABLE {table_name} AS ({entity_df})")
-
-        results = client.execute_query(f"SELECT * FROM {table_name} LIMIT 1")
+        results = client.execute_query(f"SELECT * FROM ({entity_df}) LIMIT 1")
 
         limited_entity_df = pd.DataFrame(
             data=results.data, columns=results.columns_names
@@ -473,8 +523,6 @@ def _upload_entity_df_and_get_entity_schema(
         return entity_schema
     else:
         raise InvalidEntityType(type(entity_df))
-
-    # TODO: Ensure that the table expires after some time
 
 
 def _get_trino_client(config: RepoConfig) -> Trino:
@@ -584,7 +632,9 @@ WITH entity_dataframe AS (
         {% for feature in featureview.features %}
             {{ feature }} as {% if full_feature_names %}{{ featureview.name }}__{{featureview.field_mapping.get(feature, feature)}}{% else %}{{ featureview.field_mapping.get(feature, feature) }}{% endif %}{% if loop.last %}{% else %}, {% endif %}
         {% endfor %}
-    FROM {{ featureview.table_subquery }}
+    FROM (
+        {{ featureview.table_subquery }}
+    ) AS {{ featureview.name }}__subquery
     WHERE {{ featureview.timestamp_field }} <= from_iso8601_timestamp('{{ featureview.max_event_timestamp }}')
     {% if featureview.ttl == 0 %}{% else %}
     AND {{ featureview.timestamp_field }} >= from_iso8601_timestamp('{{ featureview.min_event_timestamp }}')
@@ -601,6 +651,9 @@ WITH entity_dataframe AS (
         AND subquery.event_timestamp <= entity_dataframe.entity_timestamp
         {% if featureview.ttl == 0 %}{% else %}
         AND subquery.event_timestamp >= entity_dataframe.entity_timestamp - interval '{{ featureview.ttl }}' second
+        {% endif %}
+        {% if filter_by_created_timestamp and featureview.created_timestamp_column %}
+        AND subquery.created_timestamp <= entity_dataframe.entity_timestamp
         {% endif %}
         {% for entity in featureview.entities %}
         AND subquery.{{ entity }} = entity_dataframe.{{ entity }}

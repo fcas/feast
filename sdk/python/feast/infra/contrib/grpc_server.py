@@ -1,14 +1,15 @@
 import logging
 import threading
+from collections.abc import Mapping
 from concurrent import futures
-from typing import Optional
+from typing import Optional, Union
 
 import grpc
 import pandas as pd
-from grpc_health.v1 import health, health_pb2_grpc
 
 from feast.data_source import PushMode
 from feast.errors import FeatureServiceNotFoundException, PushSourceNotFoundException
+from feast.feature_service import FeatureService
 from feast.feature_store import FeatureStore
 from feast.protos.feast.serving.GrpcServer_pb2 import (
     PushResponse,
@@ -33,6 +34,20 @@ def parse(features):
     return pd.DataFrame.from_dict(df)
 
 
+def parse_typed(typed_features):
+    df = {}
+    for key, value in typed_features.items():
+        val_case = value.WhichOneof("val")
+        if val_case is None or val_case == "null_val":
+            df[key] = [None]
+        else:
+            raw = getattr(value, val_case)
+            if hasattr(raw, "val"):
+                raw = dict(raw.val) if isinstance(raw.val, Mapping) else list(raw.val)
+            df[key] = [raw]
+    return pd.DataFrame.from_dict(df)
+
+
 class GrpcFeatureServer(GrpcFeatureServerServicer):
     fs: FeatureStore
 
@@ -48,7 +63,17 @@ class GrpcFeatureServer(GrpcFeatureServerServicer):
 
     def Push(self, request, context):
         try:
-            df = parse(request.features)
+            if request.features and request.typed_features:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(
+                    "Only one of features or typed_features may be set, not both"
+                )
+                return PushResponse(status=False)
+            df = (
+                parse_typed(request.typed_features)
+                if request.typed_features
+                else parse(request.features)
+            )
             if request.to == "offline":
                 to = PushMode.OFFLINE
             elif request.to == "online":
@@ -61,7 +86,7 @@ class GrpcFeatureServer(GrpcFeatureServerServicer):
                     f"'online_and_offline']."
                 )
             self.fs.push(
-                push_source_name=request.push_source_name,
+                push_source_name=request.stream_feature_view,
                 df=df,
                 allow_registry_cache=request.allow_registry_cache,
                 to=to,
@@ -83,7 +108,17 @@ class GrpcFeatureServer(GrpcFeatureServerServicer):
             "write_to_online_store is deprecated. Please consider using Push instead"
         )
         try:
-            df = parse(request.features)
+            if request.features and request.typed_features:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(
+                    "Only one of features or typed_features may be set, not both"
+                )
+                return WriteToOnlineStoreResponse(status=False)
+            df = (
+                parse_typed(request.typed_features)
+                if request.typed_features
+                else parse(request.features)
+            )
             self.fs.write_to_online_store(
                 feature_view_name=request.feature_view_name,
                 df=df,
@@ -93,15 +128,17 @@ class GrpcFeatureServer(GrpcFeatureServerServicer):
             logger.exception(str(e))
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(str(e))
-            return PushResponse(status=False)
+            return WriteToOnlineStoreResponse(status=False)
         return WriteToOnlineStoreResponse(status=True)
 
     def GetOnlineFeatures(self, request: GetOnlineFeaturesRequest, context):
         if request.HasField("feature_service"):
             logger.info(f"Requesting feature service: {request.feature_service}")
             try:
-                features = self.fs.get_feature_service(
-                    request.feature_service, allow_cache=True
+                features: Union[list[str], FeatureService] = (
+                    self.fs.get_feature_service(
+                        request.feature_service, allow_cache=True
+                    )
                 )
             except FeatureServiceNotFoundException as e:
                 logger.error(f"Feature service {request.feature_service} not found")
@@ -111,7 +148,7 @@ class GrpcFeatureServer(GrpcFeatureServerServicer):
         else:
             features = list(request.features.val)
 
-        result = self.fs._get_online_features(
+        result = self.fs.get_online_features(
             features,
             request.entities,
             request.full_feature_names,
@@ -133,6 +170,8 @@ def get_grpc_server(
     max_workers: int,
     registry_ttl_sec: int,
 ):
+    from grpc_health.v1 import health, health_pb2_grpc
+
     logger.info(f"Initializing gRPC server on {address}")
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers))
     add_GrpcFeatureServerServicer_to_server(

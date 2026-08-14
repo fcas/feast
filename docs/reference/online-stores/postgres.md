@@ -1,4 +1,4 @@
-# PostgreSQL online store (contrib)
+# PostgreSQL online store
 
 ## Description
 
@@ -6,7 +6,7 @@ The PostgreSQL online store provides support for materializing feature values in
 
 * Only the latest feature values are persisted
 
-* sslmode, sslkey_path, sslcert_path, and sslrootcert_path are optional
+* `sslmode` defaults to `require`, which encrypts the connection without certificate verification. To disable SSL (e.g. for local development), set `sslmode: disable`. For certificate verification, set `sslmode` to `verify-ca` or `verify-full` and provide the corresponding `sslrootcert_path` (and optionally `sslcert_path` and `sslkey_path` for mutual TLS)
 
 ## Getting started
 In order to use this online store, you'll need to run `pip install 'feast[postgres]'`. You can get started by then running `feast init -t postgres`.
@@ -30,12 +30,11 @@ online_store:
     sslkey_path: /path/to/client-key.pem
     sslcert_path: /path/to/client-cert.pem
     sslrootcert_path: /path/to/server-ca.pem
-    pgvector_enabled: false
-    vector_len: 512
+    vector_enabled: false
 ```
 {% endcode %}
 
-The full set of configuration options is available in [PostgreSQLOnlineStoreConfig](https://rtd.feast.dev/en/master/#feast.infra.online_stores.contrib.postgres.PostgreSQLOnlineStoreConfig).
+The full set of configuration options is available in [PostgreSQLOnlineStoreConfig](https://rtd.feast.dev/en/master/#feast.infra.online_stores.postgres_online_store.PostgreSQLOnlineStoreConfig).
 
 ## Functionality Matrix
 
@@ -65,9 +64,9 @@ To compare this set of functionality against other online stores, please see the
 
 ## PGVector
 The Postgres online store supports the use of [PGVector](https://github.com/pgvector/pgvector) for storing feature values.
-To enable PGVector, set `pgvector_enabled: true` in the online store configuration. 
+To enable PGVector, set `vector_enabled: true` in the online store configuration. 
 
-The `vector_len` parameter can be used to specify the length of the vector. The default value is 512.
+The `vector_length` parameter can be used to specify the length of the vector in the Field.
 
 Please make sure to follow the instructions in the repository, which, as the time of this writing, requires you to 
 run `CREATE EXTENSION vector;` in the database.
@@ -79,7 +78,7 @@ For the Retrieval Augmented  Generation (RAG) use-case, you have to embed the qu
 {% code title="python" %}
 ```python
 from feast import FeatureStore
-from feast.infra.online_stores.postgres import retrieve_online_documents
+from feast.infra.online_stores.postgres_online_store import retrieve_online_documents
 
 feature_store = FeatureStore(repo_path=".")
 

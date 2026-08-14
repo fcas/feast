@@ -1,17 +1,16 @@
 import abc
+from datetime import timezone
 from typing import TYPE_CHECKING, Dict, Optional, Type, cast
 
 import pyarrow as pa
-from pytz import UTC
 
 from feast.data_source import DataSource
 from feast.embedded_go.type_map import FEAST_TYPE_TO_ARROW_TYPE, PA_TIMESTAMP_TYPE
 from feast.errors import (
     FeastObjectNotFoundException,
-    FeatureViewNotFoundException,
-    OnDemandFeatureViewNotFoundException,
 )
 from feast.feature_view import DUMMY_ENTITY_ID
+from feast.feature_view_utils import get_feature_view_from_registry
 from feast.protos.feast.core.FeatureService_pb2 import (
     LoggingConfig as LoggingConfigProto,
 )
@@ -58,25 +57,22 @@ class FeatureServiceLoggingSource(LoggingSource):
             # Go code can be found here:
             # https://github.com/feast-dev/feast/blob/master/go/internal/feast/server/logging/memorybuffer.go#L51
             try:
-                feature_view = registry.get_feature_view(projection.name, self._project)
-            except FeatureViewNotFoundException:
-                try:
-                    on_demand_feature_view = registry.get_on_demand_feature_view(
-                        projection.name, self._project
-                    )
-                except OnDemandFeatureViewNotFoundException:
-                    raise FeastObjectNotFoundException(
-                        f"Can't recognize feature view with a name {projection.name}"
-                    )
+                feast_object = get_feature_view_from_registry(
+                    registry,
+                    projection.name,
+                    self._project,
+                )
+            except FeastObjectNotFoundException:
+                raise FeastObjectNotFoundException(
+                    f"Can't recognize feature view with a name {projection.name}"
+                )
 
-                for (
-                    request_source
-                ) in on_demand_feature_view.source_request_sources.values():
+            if hasattr(feast_object, "source_request_sources"):
+                for request_source in feast_object.source_request_sources.values():
                     for field in request_source.schema:
                         fields[field.name] = FEAST_TYPE_TO_ARROW_TYPE[field.dtype]
-
             else:
-                for entity_column in feature_view.entity_columns:
+                for entity_column in feast_object.entity_columns:
                     if entity_column.name == DUMMY_ENTITY_ID:
                         continue
 
@@ -97,7 +93,7 @@ class FeatureServiceLoggingSource(LoggingSource):
                 )
 
         # system columns
-        fields[LOG_TIMESTAMP_FIELD] = pa.timestamp("us", tz=UTC)
+        fields[LOG_TIMESTAMP_FIELD] = pa.timestamp("us", tz=timezone.utc)
         fields[LOG_DATE_FIELD] = pa.date32()
         fields[REQUEST_ID_FIELD] = pa.string()
 

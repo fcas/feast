@@ -19,7 +19,6 @@ $ tree
 │   ├── test_go_feature_server.py
 │   ├── test_python_feature_server.py
 │   ├── test_universal_e2e.py
-│   ├── test_usage_e2e.py
 │   └── test_validation.py
 ├── feature_repos
 │   ├── integration_test_repo_config.py
@@ -49,19 +48,21 @@ $ tree
 │   ├── test_offline_write.py
 │   ├── test_push_features_to_offline_store.py
 │   ├── test_s3_custom_endpoint.py
-│   └── test_universal_historical_retrieval.py
+│   ├── test_universal_historical_retrieval.py
+│   └── test_universal_types.py
+├── cli
+│   └── test_universal_cli.py
 ├── online_store
 │   ├── test_online_retrieval.py
 │   ├── test_push_features_to_online_store.py
-│   └── test_universal_online.py
+│   ├── test_universal_online.py
+│   └── test_universal_online_types.py
 └── registration
     ├── test_feature_store.py
     ├── test_inference.py
     ├── test_registry.py
     ├── test_sql_registry.py
-    ├── test_universal_cli.py
-    ├── test_universal_odfv_feature_inference.py
-    └── test_universal_types.py
+    └── test_universal_odfv_feature_inference.py
 
 ```
 
@@ -97,8 +98,6 @@ Tests in Feast are split into integration and unit tests.
             * `test_go_feature_server.py`
         * python http server
             * `test_python_feature_server.py`
-        * usage tracking
-            * `test_usage_e2e.py`
         * data quality monitoring feature validation
             * `test_validation.py`
 2. Offline and Online Store Tests
@@ -147,7 +146,6 @@ Tests in Feast are split into integration and unit tests.
             * Type mapping
             * Feast types
             * Serialization tests due to this [issue](https://github.com/feast-dev/feast/issues/2345)
-        * Feast usage tracking unit tests
 
 #### Docstring tests
 

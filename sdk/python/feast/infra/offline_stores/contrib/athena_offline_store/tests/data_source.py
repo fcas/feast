@@ -16,7 +16,7 @@ from feast.infra.offline_stores.contrib.athena_offline_store.athena_source impor
 )
 from feast.infra.utils import aws_utils
 from feast.repo_config import FeastConfigBaseModel
-from tests.integration.feature_repos.universal.data_source_creator import (
+from tests.universal.feature_repos.universal.data_source_creator import (
     DataSourceCreator,
 )
 
@@ -47,7 +47,6 @@ class AthenaDataSourceCreator(DataSourceCreator):
         self,
         df: pd.DataFrame,
         destination_name: str,
-        event_timestamp_column="ts",
         created_timestamp_column="created_ts",
         field_mapping: Optional[Dict[str, str]] = None,
         timestamp_field: Optional[str] = "ts",

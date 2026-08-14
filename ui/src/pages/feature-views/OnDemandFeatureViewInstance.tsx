@@ -1,15 +1,12 @@
 import React from "react";
 import { Route, Routes, useNavigate } from "react-router-dom";
 import { useParams } from "react-router-dom";
-import {
-  EuiPageHeader,
-  EuiPageContent,
-  EuiPageContentBody,
-} from "@elastic/eui";
+import { EuiBadge, EuiPageTemplate } from "@elastic/eui";
 
-import { FeatureViewIcon32 } from "../../graphics/FeatureViewIcon";
-import { useMatchExact } from "../../hooks/useMatchSubpath";
+import { FeatureViewIcon } from "../../graphics/FeatureViewIcon";
+import { useMatchExact, useMatchSubpath } from "../../hooks/useMatchSubpath";
 import OnDemandFeatureViewOverviewTab from "./OnDemandFeatureViewOverviewTab";
+import FeatureViewVersionsTab from "./FeatureViewVersionsTab";
 
 import {
   useOnDemandFeatureViewCustomTabs,
@@ -29,11 +26,21 @@ const OnDemandFeatureInstance = ({ data }: OnDemandFeatureInstanceProps) => {
   const CustomTabRoutes = useOnDemandFeatureViewCustomTabRoutes();
 
   return (
-    <React.Fragment>
-      <EuiPageHeader
+    <EuiPageTemplate panelled>
+      <EuiPageTemplate.Header
         restrictWidth
-        iconType={FeatureViewIcon32}
-        pageTitle={`${featureViewName}`}
+        iconType={FeatureViewIcon}
+        pageTitle={
+          <>
+            {featureViewName}
+            {data?.meta?.currentVersionNumber != null &&
+              data.meta.currentVersionNumber > 0 && (
+                <EuiBadge color="hollow" style={{ marginLeft: 8 }}>
+                  v{data.meta.currentVersionNumber}
+                </EuiBadge>
+              )}
+          </>
+        }
         tabs={[
           {
             label: "Overview",
@@ -42,27 +49,32 @@ const OnDemandFeatureInstance = ({ data }: OnDemandFeatureInstanceProps) => {
               navigate("");
             },
           },
+          {
+            label: "Versions",
+            isSelected: useMatchSubpath("versions"),
+            onClick: () => {
+              navigate("versions");
+            },
+          },
           ...customNavigationTabs,
         ]}
       />
-      <EuiPageContent
-        hasBorder={false}
-        hasShadow={false}
-        paddingSize="none"
-        color="transparent"
-        borderRadius="none"
-      >
-        <EuiPageContentBody>
-          <Routes>
-            <Route
-              path="/"
-              element={<OnDemandFeatureViewOverviewTab data={data} />}
-            />
-            {CustomTabRoutes}
-          </Routes>
-        </EuiPageContentBody>
-      </EuiPageContent>
-    </React.Fragment>
+      <EuiPageTemplate.Section>
+        <Routes>
+          <Route
+            path="/"
+            element={<OnDemandFeatureViewOverviewTab data={data} />}
+          />
+          <Route
+            path="/versions"
+            element={
+              <FeatureViewVersionsTab featureViewName={featureViewName!} />
+            }
+          />
+          {CustomTabRoutes}
+        </Routes>
+      </EuiPageTemplate.Section>
+    </EuiPageTemplate>
   );
 };
 

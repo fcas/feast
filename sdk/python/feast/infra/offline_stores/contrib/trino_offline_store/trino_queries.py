@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import datetime
 import signal
+import threading
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -10,12 +10,14 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import trino
+import trino.auth
 from trino.dbapi import Cursor
 from trino.exceptions import TrinoQueryError
 
 from feast.infra.offline_stores.contrib.trino_offline_store.trino_type_map import (
     trino_to_pa_value_type,
 )
+from feast.utils import _utc_now
 
 
 class QueryStatus(Enum):
@@ -37,7 +39,7 @@ class Trino:
         http_scheme: str,
         verify: bool,
         extra_credential: Optional[str],
-        auth: Optional[trino.Authentication],
+        auth: Optional[trino.auth.Authentication],
     ):
         self.host = host
         self.port = port
@@ -91,22 +93,25 @@ class Query(object):
         self.status = QueryStatus.PENDING
         self._cursor = cursor
 
-        signal.signal(signal.SIGINT, self.cancel)
-        signal.signal(signal.SIGTERM, self.cancel)
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT, self.cancel)
+            signal.signal(signal.SIGTERM, self.cancel)
 
     def execute(self) -> Results:
         try:
             self.status = QueryStatus.RUNNING
-            start_time = datetime.datetime.utcnow()
+            start_time = _utc_now()
 
             self._cursor.execute(operation=self.query_text)
             rows = self._cursor.fetchall()
 
-            end_time = datetime.datetime.utcnow()
+            end_time = _utc_now()
             self.execution_time = end_time - start_time
             self.status = QueryStatus.COMPLETED
 
-            return Results(data=rows, columns=self._cursor._query.columns)
+            query = self._cursor._query
+            assert query is not None, "Cursor query should not be None after execute"
+            return Results(data=rows, columns=query.columns)
         except TrinoQueryError as error:
             self.status = QueryStatus.ERROR
             raise error

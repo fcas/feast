@@ -5,7 +5,7 @@ import {
   EuiPanel,
   EuiTitle,
   EuiBadge,
-  EuiLoadingContent,
+  EuiSkeletonText,
   EuiFlexGroup,
   EuiFlexItem,
   EuiSpacer,
@@ -15,9 +15,12 @@ import { useNavigate } from "react-router-dom";
 import useFCOExploreSuggestions from "../hooks/useFCOExploreSuggestions";
 
 const ExplorePanel = () => {
-  const { isLoading, isSuccess, data } = useFCOExploreSuggestions();
+  const { isLoading, isSuccess, isPermissionDenied, data } =
+    useFCOExploreSuggestions();
 
   const navigate = useNavigate();
+
+  if (isPermissionDenied) return null;
 
   return (
     <EuiPanel>
@@ -25,7 +28,7 @@ const ExplorePanel = () => {
         <h3>Explore this Project</h3>
       </EuiTitle>
       <EuiHorizontalRule margin="xs" />
-      {isLoading && <EuiLoadingContent lines={3} />}
+      {isLoading && <EuiSkeletonText lines={3} />}
       {isSuccess &&
         data &&
         data.map((suggestionGroup, i) => {

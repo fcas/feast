@@ -1,5 +1,3 @@
-from datetime import datetime
-
 import pandas as pd
 import pytest
 
@@ -7,8 +5,9 @@ from feast import Field
 from feast.errors import SpecifiedFeaturesNotPresentError
 from feast.infra.offline_stores.file_source import FileSource
 from feast.types import Float64
-from tests.integration.feature_repos.universal.entities import customer, driver, item
-from tests.integration.feature_repos.universal.feature_views import (
+from feast.utils import _utc_now
+from tests.universal.feature_repos.universal.entities import customer, driver, item
+from tests.universal.feature_repos.universal.feature_views import (
     conv_rate_plus_100_feature_view,
     create_conv_rate_request_source,
     create_driver_hourly_stats_batch_feature_view,
@@ -19,7 +18,6 @@ from tests.integration.feature_repos.universal.feature_views import (
 
 
 @pytest.mark.integration
-@pytest.mark.universal_offline_stores
 @pytest.mark.parametrize("infer_features", [True, False], ids=lambda v: str(v))
 def test_infer_odfv_features(environment, universal_data_sources, infer_features):
     store = environment.feature_store
@@ -50,8 +48,8 @@ def test_infer_odfv_list_features(environment, infer_features, tmp_path):
             "item_id": [0],
             "embedding_float": [fake_embedding],
             "embedding_double": [fake_embedding],
-            "event_timestamp": [pd.Timestamp(datetime.utcnow())],
-            "created": [pd.Timestamp(datetime.utcnow())],
+            "event_timestamp": [pd.Timestamp(_utc_now())],
+            "created": [pd.Timestamp(_utc_now())],
         }
     )
     output_path = f"{tmp_path}/items.parquet"

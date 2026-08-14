@@ -4,7 +4,7 @@ from typing import Callable, Dict, Iterable, Optional, Tuple
 from typeguard import typechecked
 
 from feast.data_source import DataSource
-from feast.errors import DataSourceNoNameException
+from feast.errors import DataSourceNoNameException, ZeroColumnQueryResult
 from feast.infra.utils.postgres.connection_utils import _get_conn
 from feast.protos.feast.core.DataSource_pb2 import DataSource as DataSourceProto
 from feast.protos.feast.core.SavedDataset_pb2 import (
@@ -18,6 +18,12 @@ from feast.value_type import ValueType
 
 @typechecked
 class PostgreSQLSource(DataSource):
+    """A PostgreSQLSource object defines a data source that a PostgreSQLOfflineStore class can use."""
+
+    def source_type(self) -> DataSourceProto.SourceType.ValueType:
+        # TODO: Add Postgres to DataSourceProto.SourceType
+        return DataSourceProto.CUSTOM_SOURCE
+
     def __init__(
         self,
         name: Optional[str] = None,
@@ -30,6 +36,24 @@ class PostgreSQLSource(DataSource):
         tags: Optional[Dict[str, str]] = None,
         owner: Optional[str] = "",
     ):
+        """Creates a PostgreSQLSource object.
+
+        Args:
+            name: Name of PostgreSQLSource, which should be unique within a project.
+            query: SQL query that will be used to fetch the data.
+            table: Table name.
+            timestamp_field (optional): Event timestamp field used for point-in-time joins of
+                feature values.
+            created_timestamp_column (optional): Timestamp column indicating when the row
+                was created, used for deduplicating rows.
+            field_mapping (optional): A dictionary mapping of column names in this data
+                source to feature names in a feature table or view. Only used for feature
+                columns, not entity or timestamp columns.
+            description (optional): A human-readable description.
+            tags (optional): A dictionary of key-value pairs to store arbitrary metadata.
+            owner (optional): The owner of the data source, typically the email of the primary
+                maintainer.
+        """
         self._postgres_options = PostgreSQLOptions(name=name, query=query, table=table)
 
         # If no name, use the table as the default name.
@@ -53,9 +77,7 @@ class PostgreSQLSource(DataSource):
 
     def __eq__(self, other):
         if not isinstance(other, PostgreSQLSource):
-            raise TypeError(
-                "Comparisons should only involve PostgreSQLSource class objects."
-            )
+            return False
 
         return (
             super().__eq__(other)
@@ -83,7 +105,7 @@ class PostgreSQLSource(DataSource):
             owner=data_source.owner,
         )
 
-    def to_proto(self) -> DataSourceProto:
+    def _to_proto_impl(self) -> DataSourceProto:
         data_source_proto = DataSourceProto(
             name=self.name,
             type=DataSourceProto.CUSTOM_SOURCE,
@@ -111,16 +133,54 @@ class PostgreSQLSource(DataSource):
         self, config: RepoConfig
     ) -> Iterable[Tuple[str, str]]:
         with _get_conn(config.offline_store) as conn, conn.cursor() as cur:
-            cur.execute(f"SELECT * FROM {self.get_table_query_string()} AS sub LIMIT 0")
+            query = f"SELECT * FROM {self.get_table_query_string()} AS sub LIMIT 0"
+            cur.execute(query)
+            if not cur.description:
+                raise ZeroColumnQueryResult(query)
+
             return (
                 (c.name, pg_type_code_to_pg_type(c.type_code)) for c in cur.description
             )
 
     def get_table_query_string(self) -> str:
+        """Returns a string that can be used to reference this table in SQL.
+
+        For query-based sources, returns the query wrapped in parentheses.
+
+        Note:
+            When using the returned string directly in a FROM clause with PostgreSQL,
+            you may need to add an alias if this is a query-based source. PostgreSQL
+            requires all subqueries in FROM clauses to have aliases. Consider using
+            get_table_query_string_with_alias() for automatic aliasing.
+        """
         if self._postgres_options._table:
             return f"{self._postgres_options._table}"
         else:
             return f"({self._postgres_options._query})"
+
+    def get_table_query_string_with_alias(self, alias: str = "subquery") -> str:
+        """Returns a string for use in FROM clause with alias for PostgreSQL compatibility.
+
+        PostgreSQL requires all subqueries in FROM clauses to have aliases. This method
+        automatically adds an alias when the source is query-based.
+
+        Args:
+            alias: The alias to use for query-based sources. Defaults to "subquery".
+
+        Returns:
+            For table-based sources: the table name (no alias needed).
+            For query-based sources: "(query) AS alias".
+
+        Example::
+
+            source = PostgreSQLSource(query="SELECT * FROM my_table", ...)
+            entity_sql = f"SELECT id, ts FROM {source.get_table_query_string_with_alias()}"
+            # Results in: "SELECT id, ts FROM (SELECT * FROM my_table) AS subquery"
+        """
+        if self._postgres_options._table:
+            return f"{self._postgres_options._table}"
+        else:
+            return f"({self._postgres_options._query}) AS {alias}"
 
 
 class PostgreSQLOptions:

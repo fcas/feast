@@ -8,6 +8,9 @@ We encourage you to ask questions on [GitHub](https://github.com/feast-dev/feast
 
 ## Getting started
 
+### Which programming language should I use to run Feast in a microservice architecture?
+[We recommend Python](language.md).
+
 ### Do you have any examples of how Feast should be used?
 
 The [quickstart](quickstart.md) is the easiest way to learn about Feast. For more detailed tutorials, please check out the [tutorials](../tutorials/tutorials-overview/) page.
@@ -26,7 +29,7 @@ Feature views once they are used by a feature service are intended to be immutab
 
 ### What is the difference between data sources and the offline store?
 
-The data source itself defines the underlying data warehouse table in which the features are stored. The offline store interface defines the APIs required to make an arbitrary compute layer work for Feast (e.g. pulling features given a set of feature views from their sources, exporting the data set results to different formats). Please see [data sources](concepts/data-ingestion.md) and [offline store](architecture-and-components/offline-store.md) for more details.
+The data source itself defines the underlying data warehouse table in which the features are stored. The offline store interface defines the APIs required to make an arbitrary compute layer work for Feast (e.g. pulling features given a set of feature views from their sources, exporting the data set results to different formats). Please see [data sources](concepts/data-ingestion.md) and [offline store](components/offline-store.md) for more details.
 
 ### Is it possible to have offline and online stores from different providers?
 
@@ -36,7 +39,17 @@ Yes, this is possible. For example, you can use BigQuery as an offline store and
 
 ### How do I run `get_historical_features` without providing an entity dataframe?
 
-Feast does not provide a way to do this right now. This is an area we're actively interested in contributions for. See [GitHub issue](https://github.com/feast-dev/feast/issues/1611)
+Feast does support fetching historical features without passing an entity dataframe with the request.
+
+- **Supported offline stores:** Entity-less (entity dataframe–less) retrieval is supported for the **Postgres**, **Dask**, **Spark**, and **Ray** offline stores. Postgres was the first to support it; Dask, Spark, and Ray have followed. Other offline stores may be added based on priority and community demand.
+- **Date range:** Retrieval is controlled by the `start_date` and `end_date` parameters. Supported combinations:
+  - Both params given → data in the given start-to-end time range.
+  - Only `start_date` given → data from the start date to now.
+  - Only `end_date` given → data from (end_date minus feature view TTL) to end_date.
+  - Neither given → data from (TTL window) to now.
+- **Multiple feature views:** When requesting features from multiple feature views in entity-less mode, the feature views must share entity keys so that joins can be performed correctly.
+
+We welcome contributions to add or improve entity-less retrieval. See [GitHub issue #1611](https://github.com/feast-dev/feast/issues/1611).
 
 ### Does Feast provide security or access control?
 
@@ -52,7 +65,7 @@ Yes. In earlier versions of Feast, we used Feast Spark to manage ingestion from 
 
 There are several kinds of transformations:
 
-* On demand transformations (See [docs](../reference/alpha-on-demand-feature-view.md))
+* On demand transformations (See [docs](../reference/beta-on-demand-feature-view.md))
   * These transformations are Pandas transformations run on batch data when you call `get_historical_features` and at online serving time when you call \`get\_online\_features.
   * Note that if you use push sources to ingest streaming features, these transformations will execute on the fly as well
 * Batch transformations (WIP, see [RFC](https://docs.google.com/document/d/1964OkzuBljifDvkV-0fakp2uaijnVzdwWNGdz7Vz50A/edit))
@@ -66,10 +79,6 @@ Yes. See [documentation](../reference/alpha-web-ui.md).
 ### Does Feast support composite keys?
 
 A feature view can be defined with multiple entities. Since each entity has a unique join\_key, using multiple entities will achieve the effect of a composite key.
-
-### How does Feast compare with Tecton?
-
-Please see a detailed comparison of Feast vs. Tecton [here](https://www.tecton.ai/feast/). For another comparison, please see [here](https://mlops.community/learn/feature-store/).
 
 ### What are the performance/latency characteristics of Feast?
 
@@ -92,7 +101,7 @@ The list of supported offline and online stores can be found [here](../reference
 
 ### Does Feast support using different clouds for offline vs online stores?
 
-Yes. Using a GCP or AWS provider in `feature_store.yaml` primarily sets default offline / online stores and configures where the remote registry file can live (Using the AWS provider also allows for deployment to AWS Lambda). You can override the offline and online stores to be in different clouds if you wish.
+Yes. Using a GCP or AWS provider in `feature_store.yaml` primarily sets default offline / online stores and configures where the remote registry file can live. You can override the offline and online stores to be in different clouds if you wish.
 
 ### What is the difference between a data source and an offline store?
 

@@ -1,14 +1,13 @@
-import datetime
-
 import numpy as np
 import pandas as pd
 import pytest
 
 from feast.data_source import PushMode
-from tests.integration.feature_repos.repo_configuration import (
+from feast.utils import _utc_now
+from tests.universal.feature_repos.repo_configuration import (
     construct_universal_feature_views,
 )
-from tests.integration.feature_repos.universal.entities import location
+from tests.universal.feature_repos.universal.entities import location
 
 
 @pytest.mark.integration
@@ -20,7 +19,7 @@ def test_push_features_and_read(environment, universal_data_sources):
     location_fv = feature_views.pushed_locations
     store.apply([location(), location_fv])
 
-    now = pd.Timestamp(datetime.datetime.utcnow()).round("ms")
+    now = pd.Timestamp(_utc_now()).round("ms")
     entity_df = pd.DataFrame.from_dict({"location_id": [1], "event_timestamp": [now]})
 
     before_df = store.get_historical_features(

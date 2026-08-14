@@ -1,6 +1,32 @@
 # Quickstart
 
-In this tutorial we will
+## What is Feast?
+
+Feast (Feature Store) is an open-source feature store designed to facilitate the management and serving of machine learning features in a way that supports both batch and real-time applications.
+
+* *For Data Scientists*: Feast is a tool where you can easily define, store, and retrieve your features for both model development and model deployment. By using Feast, you can focus on what you do best: build features that power your AI/ML models and maximize the value of your data.
+	
+* *For MLOps Engineers*: Feast is a library that allows you to connect your existing infrastructure (e.g., online database, application server, microservice, analytical database, and orchestration tooling) that enables your Data Scientists to ship features for their models to production using a friendly SDK without having to be concerned with software engineering challenges that occur from serving real-time production systems. By using Feast, you can focus on maintaining a resilient system, instead of implementing features for Data Scientists.
+	
+* *For Data Engineers*: Feast provides a centralized catalog for storing feature definitions allowing one to maintain a single source of truth for feature data. It provides the abstraction for reading and writing to many different types of offline and online data stores. Using either the provided python SDK or the feature server service, users can write data to the online and/or offline stores and then read that data out again in either low-latency online scenarios for model inference, or in batch scenarios for model training.
+
+* *For AI Engineers*: Feast provides a platform designed to scale your AI applications by enabling seamless integration of richer data and facilitating fine-tuning. With Feast, you can optimize the performance of your AI models while ensuring a scalable and efficient data pipeline.
+
+
+For more info refer to [Introduction to feast](../README.md)
+
+## Prerequisites
+* Ensure that you have Python (3.9 or above) installed.
+* It is recommended to create and work in a virtual environment:
+  ```sh
+  # create & activate a virtual environment
+  python -m venv venv/
+  source venv/bin/activate
+  ```
+
+## Overview
+
+In this tutorial we will:
 
 1. Deploy a local feature store with a **Parquet file offline store** and **Sqlite online store**.
 2. Build a training dataset using our time series features from our **Parquet files**.
@@ -9,7 +35,9 @@ In this tutorial we will
 5. Read the latest features from the online store for real-time inference.
 6. Explore the (experimental) Feast UI
 
-## Overview
+***Note*** - Feast provides a python SDK as well as an optional [hosted service](../reference/feature-servers/python-feature-server.md) for reading and writing feature data to the online and offline data stores. The latter might be useful when non-python languages are required.
+
+For this tutorial, we will be using the python SDK.
 
 In this tutorial, we'll use Feast to generate training data and power online model inference for a 
 ride-sharing driver satisfaction prediction model. Feast solves several common issues in this flow:
@@ -69,7 +97,7 @@ Creating a new Feast repository in /home/Jovyan/my_project.
 Let's take a look at the resulting demo repo itself. It breaks down into
 
 * `data/` contains raw demo parquet data
-* `example_repo.py` contains demo feature definitions
+* `feature_definitions.py` contains demo feature definitions
 * `feature_store.yaml` contains a demo setup configuring where data sources are
 * `test_workflow.py` showcases how to run all key Feast commands, including defining, retrieving, and pushing features.
   You can run this with `python test_workflow.py`.
@@ -85,11 +113,11 @@ provider: local
 online_store:
   type: sqlite
   path: data/online_store.db
-entity_key_serialization_version: 2
+entity_key_serialization_version: 3
 ```
 {% endtab %}
 
-{% tab title="example_repo.py" %}
+{% tab title="feature_definitions.py" %}
 ```python
 # This is an example feature definition file
 
@@ -103,11 +131,16 @@ from feast import (
     FeatureView,
     Field,
     FileSource,
+    Project,
     PushSource,
     RequestSource,
 )
 from feast.on_demand_feature_view import on_demand_feature_view
 from feast.types import Float32, Float64, Int64
+
+# Define a project for the feature repo
+project = Project(name="my_project", description="A project for driver statistics")
+
 
 # Define an entity for the driver. You can think of an entity as a primary key used to
 # fetch features.
@@ -127,8 +160,10 @@ driver_stats_source = FileSource(
 # three feature column. Here we define a Feature View that will allow us to serve this
 # data to our model online.
 driver_stats_fv = FeatureView(
-    # The unique name of this feature view. Two feature views in a single
-    # project cannot have the same name
+# The unique name of this feature view. Two feature views in a single
+# project cannot have the same name, and names must be unique across
+# all feature view types (regular, stream, on-demand) to avoid conflicts
+# during `feast apply`.
     name="driver_hourly_stats",
     entities=[driver],
     ttl=timedelta(days=1),
@@ -274,10 +309,10 @@ There's an included `test_workflow.py` file which runs through a full sample wor
 7. Verify online features are updated / fresher
 
 We'll walk through some snippets of code below and explain
-### Step 3a: Register feature definitions and deploy your feature store
+### Step 4: Register feature definitions and deploy your feature store
 
 The `apply` command scans python files in the current directory for feature view/entity definitions, registers the 
-objects, and deploys infrastructure. In this example, it reads `example_repo.py` and sets up SQLite online store tables. Note that we had specified SQLite as the default online store by 
+objects, and deploys infrastructure. In this example, it reads `feature_definitions.py` and sets up SQLite online store tables. Note that we had specified SQLite as the default online store by 
 configuring `online_store` in `feature_store.yaml`.
 
 {% tabs %}
@@ -306,7 +341,7 @@ Created sqlite table my_project_driver_hourly_stats
 {% endtab %}
 {% endtabs %}
 
-### Step 3b: Generating training data or powering batch scoring models
+### Step 5: Generating training data or powering batch scoring models
 
 To train a model, we need features and labels. Often, this label data is stored separately (e.g. you have one table storing user survey results and another set of tables with feature values). Feast can help generate the features that map to these labels.
 
@@ -335,6 +370,9 @@ entity_df = pd.DataFrame.from_dict(
         # entity's join key -> entity values
         "driver_id": [1001, 1002, 1003],
         # "event_timestamp" (reserved key) -> timestamps
+        # Each timestamp acts as the upper bound for the point-in-time join:
+        # Feast retrieves the latest feature values at or before this time,
+        # preventing data leakage from future events.
         "event_timestamp": [
             datetime(2021, 4, 12, 10, 59, 42),
             datetime(2021, 4, 12, 8, 12, 10),
@@ -461,16 +499,22 @@ print(training_df.head())
 ```
 {% endtab %}
 {% endtabs %}
-### Step 3c: Ingest batch features into your online store
+### Step 6: Ingest batch features into your online store
 
-We now serialize the latest values of features since the beginning of time to prepare for serving (note: 
-`materialize-incremental` serializes all new features since the last `materialize` call).
+We now serialize the latest values of features since the beginning of time to prepare for serving. Note, `materialize_incremental` serializes all new features since the last `materialize` call, or since the time provided minus the `ttl` timedelta. In this case, this will be `CURRENT_TIME - 1 day` (`ttl` was set on the `FeatureView` instances in `feature_definitions.py`).
 
 {% tabs %}
-{% tab title="Bash" %}
+{% tab title="Bash (with timestamp)" %}
 ```bash
 CURRENT_TIME=$(date -u +"%Y-%m-%dT%H:%M:%S")
+
 feast materialize-incremental $CURRENT_TIME
+```
+{% endtab %}
+{% tab title="Bash (simple)" %}
+```bash
+# Alternative: Materialize all data using current timestamp (for data without event timestamps)
+feast materialize --disable-event-timestamp
 ```
 {% endtab %}
 {% endtabs %}
@@ -489,7 +533,7 @@ Materializing 2 feature views to 2024-04-19 10:59:58-04:00 into the sqlite onlin
 {% endtab %}
 {% endtabs %}
 
-### Step 3d: Fetching feature vectors for inference
+### Step 7: Fetching feature vectors for inference
 
 At inference time, we need to quickly read the latest feature values for different drivers (which otherwise might 
 have existed only in batch sources) from the online feature store using `get_online_features()`. These feature 
@@ -534,7 +578,7 @@ pprint(feature_vector)
 {% endtab %}
 {% endtabs %}
 
-### Step 3e: Using a feature service to fetch online features instead.
+### Step 8: Using a feature service to fetch online features instead.
 
 You can also use feature services to manage multiple features, and decouple feature view definitions and the 
 features needed by end applications. The feature store can also be used to fetch either online or historical 
@@ -584,7 +628,7 @@ pprint(feature_vector)
 {% endtab %}
 {% endtabs %}
 
-## Step 4: Browse your features with the Web UI (experimental)
+## Step 9: Browse your features with the Web UI (experimental)
 
 View all registered features, data sources, entities, and feature services with the Web UI.
 
@@ -616,13 +660,14 @@ INFO:     Uvicorn running on http://0.0.0.0:8888 (Press CTRL+C to quit)
 
 ![](../reference/ui.png)
 
-## Step 5: Re-examine `test_workflow.py`
+## Step 10: Re-examine `test_workflow.py`
 Take a look at `test_workflow.py` again. It showcases many sample flows on how to interact with Feast. You'll see these 
 show up in the upcoming concepts + architecture + tutorial pages as well. 
 
 ## Next steps
 
+* Run `feast demo-notebooks` to generate tailored Jupyter notebooks for your project. See [Demo Notebooks](../tutorials/demo-notebooks.md).
 * Read the [Concepts](concepts/) page to understand the Feast data model.
-* Read the [Architecture](architecture-and-components/) page.
+* Read the [Architecture](architecture/) page.
 * Check out our [Tutorials](../tutorials/tutorials-overview/) section for more examples on how to use Feast.
 * Follow our [Running Feast with Snowflake/GCP/AWS](../how-to-guides/feast-snowflake-gcp-aws/) guide for a more in-depth tutorial on using Feast.

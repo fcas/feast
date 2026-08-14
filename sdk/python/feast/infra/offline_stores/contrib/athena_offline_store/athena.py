@@ -1,6 +1,6 @@
 import contextlib
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import (
     Callable,
@@ -19,7 +19,6 @@ import pandas as pd
 import pyarrow
 import pyarrow as pa
 from pydantic import StrictStr
-from pytz import utc
 
 from feast import OnDemandFeatureView
 from feast.data_source import DataSource
@@ -37,12 +36,11 @@ from feast.infra.offline_stores.offline_store import (
     RetrievalJob,
     RetrievalMetadata,
 )
+from feast.infra.offline_stores.offline_utils import get_timestamp_filter_sql
 from feast.infra.registry.base_registry import BaseRegistry
-from feast.infra.registry.registry import Registry
 from feast.infra.utils import aws_utils
 from feast.repo_config import FeastConfigBaseModel, RepoConfig
 from feast.saved_dataset import SavedDatasetStorage
-from feast.usage import log_exceptions_and_usage
 
 
 class AthenaOfflineStoreConfig(FeastConfigBaseModel):
@@ -68,8 +66,9 @@ class AthenaOfflineStoreConfig(FeastConfigBaseModel):
 
 
 class AthenaOfflineStore(OfflineStore):
+    supports_filter_by_created_timestamp = True
+
     @staticmethod
-    @log_exceptions_and_usage(offline_store="athena")
     def pull_latest_from_table_or_query(
         config: RepoConfig,
         data_source: DataSource,
@@ -103,8 +102,8 @@ class AthenaOfflineStore(OfflineStore):
         athena_client = aws_utils.get_athena_data_client(config.offline_store.region)
         s3_resource = aws_utils.get_s3_resource(config.offline_store.region)
 
-        start_date = start_date.astimezone(tz=utc)
-        end_date = end_date.astimezone(tz=utc)
+        start_date = start_date.astimezone(tz=timezone.utc)
+        end_date = end_date.astimezone(tz=timezone.utc)
 
         query = f"""
             SELECT
@@ -114,8 +113,8 @@ class AthenaOfflineStore(OfflineStore):
                 SELECT {field_string},
                 ROW_NUMBER() OVER({partition_by_join_key_string} ORDER BY {timestamp_desc_string}) AS _feast_row
                 FROM {from_expression}
-                WHERE {timestamp_field} BETWEEN TIMESTAMP '{start_date.strftime('%Y-%m-%d %H:%M:%S')}' AND TIMESTAMP '{end_date.strftime('%Y-%m-%d %H:%M:%S')}'
-                {"AND "+date_partition_column+" >= '"+start_date.strftime('%Y-%m-%d')+"' AND "+date_partition_column+" <= '"+end_date.strftime('%Y-%m-%d')+"' " if date_partition_column != "" and date_partition_column is not None else ''}
+                WHERE {timestamp_field} BETWEEN TIMESTAMP '{start_date.strftime("%Y-%m-%d %H:%M:%S")}' AND TIMESTAMP '{end_date.strftime("%Y-%m-%d %H:%M:%S")}'
+                {"AND " + date_partition_column + " >= '" + start_date.strftime("%Y-%m-%d") + "' AND " + date_partition_column + " <= '" + end_date.strftime("%Y-%m-%d") + "' " if date_partition_column != "" and date_partition_column is not None else ""}
             )
             WHERE _feast_row = 1
             """
@@ -129,22 +128,25 @@ class AthenaOfflineStore(OfflineStore):
         )
 
     @staticmethod
-    @log_exceptions_and_usage(offline_store="athena")
     def pull_all_from_table_or_query(
         config: RepoConfig,
         data_source: DataSource,
         join_key_columns: List[str],
         feature_name_columns: List[str],
         timestamp_field: str,
-        start_date: datetime,
-        end_date: datetime,
+        created_timestamp_column: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
     ) -> RetrievalJob:
         assert isinstance(config.offline_store, AthenaOfflineStoreConfig)
         assert isinstance(data_source, AthenaSource)
         from_expression = data_source.get_table_query_string(config)
 
+        timestamp_fields = [timestamp_field]
+        if created_timestamp_column:
+            timestamp_fields.append(created_timestamp_column)
         field_string = ", ".join(
-            join_key_columns + feature_name_columns + [timestamp_field]
+            join_key_columns + feature_name_columns + timestamp_fields
         )
 
         athena_client = aws_utils.get_athena_data_client(config.offline_store.region)
@@ -152,11 +154,30 @@ class AthenaOfflineStore(OfflineStore):
 
         date_partition_column = data_source.date_partition_column
 
+        start_date_str = None
+        if start_date:
+            start_date_str = start_date.astimezone(tz=timezone.utc).strftime(
+                "%Y-%m-%d %H:%M:%S.%f"
+            )[:-3]
+        end_date_str = None
+        if end_date:
+            end_date_str = end_date.astimezone(tz=timezone.utc).strftime(
+                "%Y-%m-%d %H:%M:%S.%f"
+            )[:-3]
+
+        timestamp_filter = get_timestamp_filter_sql(
+            start_date_str,
+            end_date_str,
+            timestamp_field,
+            date_partition_column,
+            cast_style="timestamp",
+            quote_fields=False,
+        )
+
         query = f"""
             SELECT {field_string}
             FROM {from_expression}
-            WHERE {timestamp_field} BETWEEN TIMESTAMP '{start_date.astimezone(tz=utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]}' AND TIMESTAMP '{end_date.astimezone(tz=utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]}'
-            {"AND "+date_partition_column+" >= '"+start_date.strftime('%Y-%m-%d')+"' AND "+date_partition_column+" <= '"+end_date.strftime('%Y-%m-%d')+"' " if date_partition_column != "" and date_partition_column is not None else ''}
+            WHERE {timestamp_filter}
         """
 
         return AthenaRetrievalJob(
@@ -168,15 +189,15 @@ class AthenaOfflineStore(OfflineStore):
         )
 
     @staticmethod
-    @log_exceptions_and_usage(offline_store="athena")
     def get_historical_features(
         config: RepoConfig,
         feature_views: List[FeatureView],
         feature_refs: List[str],
         entity_df: Union[pd.DataFrame, str],
-        registry: Registry,
+        registry: BaseRegistry,
         project: str,
         full_feature_names: bool = False,
+        filter_by_created_timestamp: bool = False,
     ) -> RetrievalJob:
         assert isinstance(config.offline_store, AthenaOfflineStoreConfig)
         for fv in feature_views:
@@ -234,6 +255,7 @@ class AthenaOfflineStore(OfflineStore):
                 entity_df_columns=entity_schema.keys(),
                 query_template=MULTIPLE_FEATURE_VIEW_POINT_IN_TIME_JOIN,
                 full_feature_names=full_feature_names,
+                filter_by_created_timestamp=filter_by_created_timestamp,
             )
 
             try:
@@ -372,7 +394,6 @@ class AthenaRetrievalJob(RetrievalJob):
                                 """
         return temp_table_dml_header
 
-    @log_exceptions_and_usage
     def _to_df_internal(self, timeout: Optional[int] = None) -> pd.DataFrame:
         with self._query_generator() as query:
             temp_table_name = "_" + str(uuid.uuid4()).replace("-", "")
@@ -389,7 +410,6 @@ class AthenaRetrievalJob(RetrievalJob):
                 temp_table_name,
             )
 
-    @log_exceptions_and_usage
     def _to_arrow_internal(self, timeout: Optional[int] = None) -> pa.Table:
         with self._query_generator() as query:
             temp_table_name = "_" + str(uuid.uuid4()).replace("-", "")
@@ -419,7 +439,6 @@ class AthenaRetrievalJob(RetrievalJob):
         assert isinstance(storage, SavedDatasetAthenaStorage)
         self.to_athena(table_name=storage.athena_options.table)
 
-    @log_exceptions_and_usage
     def to_athena(self, table_name: str) -> None:
         if self.on_demand_feature_views:
             transformed_df = self.to_df()
@@ -634,6 +653,10 @@ WITH entity_dataframe AS (
 
         {% if featureview.ttl == 0 %}{% else %}
         AND subquery.event_timestamp >= entity_dataframe.entity_timestamp - {{ featureview.ttl }} * interval '1' second
+        {% endif %}
+
+        {% if filter_by_created_timestamp and featureview.created_timestamp_column %}
+        AND subquery.created_timestamp <= entity_dataframe.entity_timestamp
         {% endif %}
 
         {% for entity in featureview.entities %}

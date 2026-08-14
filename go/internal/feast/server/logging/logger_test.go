@@ -2,16 +2,16 @@ package logging
 
 import (
 	"context"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/apache/arrow/go/v8/arrow"
-	"github.com/apache/arrow/go/v8/arrow/array"
-	"github.com/apache/arrow/go/v8/arrow/memory"
-	"github.com/apache/arrow/go/v8/parquet/file"
-	"github.com/apache/arrow/go/v8/parquet/pqarrow"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/parquet/file"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/stretchr/testify/require"
 
 	"github.com/feast-dev/feast/go/protos/feast/types"
@@ -114,11 +114,11 @@ func TestLogAndFlushToFile(t *testing.T) {
 	))
 
 	require.Eventually(t, func() bool {
-		files, _ := ioutil.ReadDir(sink.path)
+		files, _ := os.ReadDir(sink.path)
 		return len(files) > 0
 	}, 60*time.Second, 100*time.Millisecond)
 
-	files, _ := ioutil.ReadDir(sink.path)
+	files, _ := os.ReadDir(sink.path)
 
 	pf, err := file.OpenParquetFile(filepath.Join(sink.path, files[0].Name()), false)
 	assert.Nil(t, err)

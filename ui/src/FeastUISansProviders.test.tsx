@@ -10,20 +10,14 @@ import {
 import userEvent from "@testing-library/user-event";
 
 import FeastUISansProviders from "./FeastUISansProviders";
-import {
-  projectsListWithDefaultProject,
-  creditHistoryRegistry,
-} from "./mocks/handlers";
+import { allRestHandlers } from "./mocks/handlers";
 
 import { readFileSync } from "fs";
 import { feast } from "./protos";
 import path from "path";
 
 // declare which API requests to mock
-const server = setupServer(
-  projectsListWithDefaultProject,
-  creditHistoryRegistry
-);
+const server = setupServer(...allRestHandlers);
 const registry = readFileSync(path.resolve(__dirname, "../public/registry.db"));
 const parsedRegistry = feast.core.Registry.decode(registry);
 
@@ -54,49 +48,44 @@ test("full app rendering", async () => {
   // Explore Panel Should Appear
   expect(screen.getByText(/Explore this Project/i)).toBeInTheDocument();
 
-  const projectNameRegExp = new RegExp(
-    parsedRegistry.projectMetadata[0].project!,
-    "i"
-  );
-
   // It should load the default project, which is credit_scoring_aws
+  // The heading shows the display name from projects-list.json
   await waitFor(() => {
-    expect(screen.getByText(projectNameRegExp)).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /Credit Score Project/i }),
+    ).toBeInTheDocument();
   });
 });
 
-const leftClick = { button: 0 };
-
 test("routes are reachable", async () => {
+  const user = userEvent.setup();
+
   render(<FeastUISansProviders />);
 
   // Wait for content to load
   await screen.findByText(/Explore this Project/i);
 
-  const mainRoutesNames = [
-    "Data Sources",
-    "Entities",
-    "Feature Views",
-    "Feature Services",
-    "Datasets",
+  const mainRoutes = [
+    { link: "Data Sources", heading: "Data Sources" },
+    { link: "Entities", heading: "Entities" },
+    { link: "Feature Views", heading: "Feature Views" },
+    { link: "Feature Services", heading: "Feature Services" },
+    { link: "Datasets", heading: "Data Catalog" },
   ];
 
-  for (const routeName of mainRoutesNames) {
+  for (const { link, heading } of mainRoutes) {
     // Main heading shouldn't start with the route name
     expect(
-      screen.queryByRole("heading", { name: routeName, level: 1 })
+      screen.queryByRole("heading", { name: heading, level: 1 }),
     ).toBeNull();
 
-    const routeRegExp = new RegExp(routeName, "i");
+    const routeRegExp = new RegExp(link, "i");
 
-    userEvent.click(
-      screen.getByRole("button", { name: routeRegExp }),
-      leftClick
-    );
+    await user.click(screen.getByRole("link", { name: routeRegExp }));
 
     // Should land on a page with the heading
     screen.getByRole("heading", {
-      name: routeName,
+      name: heading,
       level: 1,
     });
   }
@@ -107,13 +96,15 @@ const featureViewName = spec.name!;
 const featureName = spec.features![0]!.name!;
 
 test("features are reachable", async () => {
+  const user = userEvent.setup();
+
   render(<FeastUISansProviders />);
 
   // Wait for content to load
   await screen.findByText(/Explore this Project/i);
   const routeRegExp = new RegExp("Feature Views", "i");
 
-  userEvent.click(screen.getByRole("button", { name: routeRegExp }), leftClick);
+  await user.click(screen.getByRole("link", { name: routeRegExp }));
 
   screen.getByRole("heading", {
     name: "Feature Views",
@@ -122,12 +113,12 @@ test("features are reachable", async () => {
   await screen.findAllByText(/Feature Views/i);
   const fvRegExp = new RegExp(featureViewName, "i");
 
-  userEvent.click(screen.getByRole("link", { name: fvRegExp }), leftClick);
+  await user.click(screen.getByRole("link", { name: fvRegExp }));
 
   await screen.findByText(featureName);
   const fRegExp = new RegExp(featureName, "i");
 
-  userEvent.click(screen.getByRole("link", { name: fRegExp }), leftClick);
+  await user.click(screen.getByRole("link", { name: fRegExp }));
   // Should land on a page with the heading
   // await screen.findByText("Feature: " + featureName);
   screen.getByRole("heading", {
