@@ -133,7 +133,7 @@ ray = [
 "datasets>=3.6.0",
 ]
 redis = [
-    "redis>=4.2.2,<8",
+    "redis>=4.2.2,<9",
     "hiredis>=2.0.0,<4",
 ]
 scylladb = ["scylla-driver>=3.28.0,<4"]
